@@ -1,0 +1,21 @@
+[project]
+name = "stratiq-workspace"
+version = "0.1.0"
+description = "StratIQ monorepo workspace"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "stratiq",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+]
+
+[tool.uv.sources]
+stratiq = { workspace = true }
+
+[tool.uv.workspace]
+members = ["apps/api"]
