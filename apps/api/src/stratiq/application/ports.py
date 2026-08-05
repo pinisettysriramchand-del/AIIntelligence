@@ -1,132 +1,102 @@
+"""Port interfaces (Protocols) for the application layer.
+
+All concrete infrastructure adapters must satisfy these protocols.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol
-from uuid import UUID
-
-from stratiq.domain.entities import (
-    ChatMessage,
-    ChatSession,
-    Chunk,
-    Citation,
-    DecisionCard,
-    Document,
-    ExecutiveReport,
-    KPI,
-    User,
-)
+import uuid
+from typing import Any, Protocol, runtime_checkable
 
 
-class UserRepository(Protocol):
-    async def create(self, email: str, password_hash: str, full_name: str) -> User: ...
-    async def get_by_email(self, email: str) -> User | None: ...
-    async def get_by_id(self, user_id: UUID) -> User | None: ...
-
-
-class DocumentRepository(Protocol):
-    async def create(self, document: Document) -> Document: ...
-    async def get(self, document_id: UUID, owner_id: UUID) -> Document | None: ...
-    async def list_for_owner(self, owner_id: UUID) -> list[Document]: ...
-    async def update(self, document: Document) -> Document: ...
-    async def get_by_id(self, document_id: UUID) -> Document | None: ...
-
-
-class ChunkRepository(Protocol):
-    async def replace_for_document(self, document_id: UUID, chunks: list[Chunk]) -> list[Chunk]: ...
-    async def list_for_document(self, document_id: UUID) -> list[Chunk]: ...
-    async def get_many(self, chunk_ids: list[UUID]) -> list[Chunk]: ...
-
-
-class KPIRepository(Protocol):
-    async def replace_for_document(self, document_id: UUID, kpis: list[KPI]) -> list[KPI]: ...
-    async def list_for_owner(self, owner_id: UUID, document_id: UUID | None = None) -> list[KPI]: ...
-    async def get(self, kpi_id: UUID, owner_id: UUID) -> KPI | None: ...
-
-
-class DecisionRepository(Protocol):
-    async def replace_cards(
-        self,
-        owner_id: UUID,
-        cards: list[DecisionCard],
-        document_id: UUID | None = None,
-    ) -> list[DecisionCard]: ...
-    async def list_cards(
-        self, owner_id: UUID, document_id: UUID | None = None
-    ) -> list[DecisionCard]: ...
-    async def get_card(self, card_id: UUID, owner_id: UUID) -> DecisionCard | None: ...
-    async def save_executive_report(self, report: ExecutiveReport) -> ExecutiveReport: ...
-    async def get_latest_executive_report(
-        self, owner_id: UUID, document_id: UUID | None = None
-    ) -> ExecutiveReport | None: ...
-
-
-class ChatRepository(Protocol):
-    async def create_session(self, owner_id: UUID, title: str) -> ChatSession: ...
-    async def get_session(self, session_id: UUID, owner_id: UUID) -> ChatSession | None: ...
-    async def list_sessions(self, owner_id: UUID) -> list[ChatSession]: ...
-    async def add_message(
-        self,
-        session_id: UUID,
-        role: str,
-        content: str,
-        citations: list[Citation] | None = None,
-    ) -> ChatMessage: ...
-    async def list_messages(self, session_id: UUID, owner_id: UUID) -> list[ChatMessage]: ...
-
-
-class AuditRepository(Protocol):
-    async def record(
-        self,
-        action: str,
-        actor_id: UUID | None,
-        resource_type: str | None = None,
-        resource_id: str | None = None,
-        details: dict[str, Any] | None = None,
-    ) -> None: ...
-
-
+@runtime_checkable
 class ObjectStorage(Protocol):
-    async def put(self, key: str, data: bytes, content_type: str) -> str: ...
-    async def get(self, key: str) -> bytes: ...
-    async def delete(self, key: str) -> None: ...
+    """S3-compatible object storage port."""
+
+    async def save(self, key: str, data: bytes, content_type: str) -> str:
+        """Persist *data* under *key*; return the resolved storage path."""
+        ...
+
+    async def load(self, key: str) -> bytes:
+        """Return the raw bytes stored at *key*."""
+        ...
+
+    async def delete(self, key: str) -> None:
+        """Remove the object at *key*."""
+        ...
+
+    async def exists(self, key: str) -> bool:
+        """Return True if the object at *key* exists."""
+        ...
 
 
-class TokenStore(Protocol):
-    async def store_refresh(self, user_id: UUID, token_id: str, ttl_seconds: int) -> None: ...
-    async def revoke_refresh(self, user_id: UUID, token_id: str) -> None: ...
-    async def is_refresh_valid(self, user_id: UUID, token_id: str) -> bool: ...
-    async def blacklist_access(self, jti: str, ttl_seconds: int) -> None: ...
-    async def is_access_blacklisted(self, jti: str) -> bool: ...
-
-
-class JobQueue(Protocol):
-    async def enqueue_process_document(self, document_id: str) -> str: ...
-
-
-class EmbeddingsPort(Protocol):
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
-
-
-class LLMPort(Protocol):
-    async def complete_json(self, system: str, user: str) -> dict[str, Any]: ...
-    async def complete_text(self, system: str, user: str) -> str: ...
-
-
+@runtime_checkable
 class VectorStore(Protocol):
-    async def ensure_collection(self, vector_size: int) -> None: ...
-    async def upsert_chunks(
+    """Vector database port."""
+
+    async def upsert(
         self,
+        collection: str,
         points: list[dict[str, Any]],
-    ) -> None: ...
+    ) -> None:
+        """Insert or update vector points in *collection*."""
+        ...
+
     async def search(
         self,
-        vector: list[float],
-        owner_id: str,
+        collection: str,
+        query_vector: list[float],
         top_k: int,
-        document_id: str | None = None,
-    ) -> list[dict[str, Any]]: ...
-    async def delete_document(self, document_id: str) -> None: ...
+        filter_payload: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Return the *top_k* nearest neighbours from *collection*."""
+        ...
+
+    async def delete_by_document(self, collection: str, document_id: uuid.UUID) -> None:
+        """Delete all points belonging to *document_id*."""
+        ...
 
 
-class DocumentParser(Protocol):
-    def supports(self, filename: str, content_type: str) -> bool: ...
-    def parse(self, data: bytes, filename: str) -> str: ...
+@runtime_checkable
+class LLMClient(Protocol):
+    """Language-model client port."""
+
+    async def chat_completion(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
+        """Return the assistant reply text."""
+        ...
+
+    async def json_completion(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        """Return a JSON-parsed dict from the model output."""
+        ...
+
+
+@runtime_checkable
+class EmbeddingClient(Protocol):
+    """Text-embedding client port."""
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Return one embedding vector per input text."""
+        ...
+
+    async def embed_one(self, text: str) -> list[float]:
+        """Return a single embedding vector."""
+        ...
+
+
+@runtime_checkable
+class TaskQueue(Protocol):
+    """Async task-queue port (ARQ-backed)."""
+
+    async def enqueue(self, function_name: str, **kwargs: Any) -> str:
+        """Enqueue a background task; return the job id."""
+        ...

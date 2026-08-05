@@ -1,144 +1,238 @@
+"""FastAPI dependency injection helpers."""
+
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+import uuid
+from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
-from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from stratiq.application.audit import AuditService
 from stratiq.application.auth import AuthService
 from stratiq.application.chat import ChatService
-from stratiq.application.decisions import DecisionIntelligenceService
+from stratiq.application.dashboard import DashboardService
 from stratiq.application.documents import DocumentService
-from stratiq.application.kpis import DashboardService, KPIService
-from stratiq.application.reports import ReportService
+from stratiq.application.kpis import KPIService
 from stratiq.config import Settings, get_settings
 from stratiq.domain.entities import User
-from stratiq.domain.exceptions import AuthenticationError
-from stratiq.infrastructure.ai.llm import OpenAICompatibleEmbeddings, OpenAICompatibleLLM
-from stratiq.infrastructure.auth.security import RedisTokenStore
-from stratiq.infrastructure.db.repositories import (
-    SqlAlchemyAuditRepository,
-    SqlAlchemyChatRepository,
-    SqlAlchemyChunkRepository,
-    SqlAlchemyDecisionRepository,
-    SqlAlchemyDocumentRepository,
-    SqlAlchemyKPIRepository,
-    SqlAlchemyUserRepository,
+from stratiq.domain.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    ConflictError,
+    EvidenceRequiredError,
+    NotFoundError,
+    ProcessingError,
+    StorageError,
+    ValidationError,
 )
-from stratiq.infrastructure.db.session import get_session
-from stratiq.infrastructure.queue.tasks import ArqJobQueue
-from stratiq.infrastructure.redis_client import create_redis
-from stratiq.infrastructure.storage.local import LocalObjectStorage
+from stratiq.infrastructure.ai.embeddings import OpenAIEmbeddingClient
+from stratiq.infrastructure.ai.llm import OpenAILLMClient
+from stratiq.infrastructure.auth.security import SecurityHelper
+from stratiq.infrastructure.chunking.semantic import SemanticChunker
+from stratiq.infrastructure.db.repositories import (
+    AuditRepository,
+    ChatMessageRepository,
+    ChatSessionRepository,
+    ChunkRepository,
+    DocumentRepository,
+    KPIRepository,
+    UserRepository,
+)
+from stratiq.infrastructure.db.session import get_db_session
+from stratiq.infrastructure.parsers.factory import ParserFactory
+from stratiq.infrastructure.queue.tasks import ArqTaskQueue
+from stratiq.infrastructure.redis_client import get_redis
+from stratiq.infrastructure.storage.local import LocalFileStorage
 from stratiq.infrastructure.vector.qdrant_store import QdrantVectorStore
 
-_redis: Redis | None = None
-_jobs: ArqJobQueue | None = None
+_bearer = HTTPBearer(auto_error=False)
 
 
-async def get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        _redis = create_redis()
-    return _redis
+def _domain_exception_to_http(exc: Exception) -> HTTPException:
+    if isinstance(exc, NotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, AuthenticationError):
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
+    if isinstance(exc, AuthorizationError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    if isinstance(exc, ConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, (ValidationError, EvidenceRequiredError)):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    if isinstance(exc, (ProcessingError, StorageError)):
+        return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error.")
 
 
-async def get_job_queue(settings: Settings = Depends(get_settings)) -> ArqJobQueue:
-    global _jobs
-    if _jobs is None:
-        _jobs = ArqJobQueue(settings.redis_url)
-    return _jobs
+# ── Database session ──────────────────────────────────────────────────────────
+
+DbSession = Annotated[object, Depends(get_db_session)]
 
 
-@dataclass
-class Services:
-    auth: AuthService
-    documents: DocumentService
-    kpis: KPIService
-    dashboard: DashboardService
-    chat: ChatService
-    decisions: DecisionIntelligenceService
-    reports: ReportService
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
-async def get_services(
-    session: AsyncSession = Depends(get_session),
-    redis: Redis = Depends(get_redis),
-    jobs: ArqJobQueue = Depends(get_job_queue),
-    settings: Settings = Depends(get_settings),
-) -> AsyncGenerator[Services, None]:
-    users = SqlAlchemyUserRepository(session)
-    documents = SqlAlchemyDocumentRepository(session)
-    chunks = SqlAlchemyChunkRepository(session)
-    kpis = SqlAlchemyKPIRepository(session)
-    chats = SqlAlchemyChatRepository(session)
-    decisions_repo = SqlAlchemyDecisionRepository(session)
-    audit = SqlAlchemyAuditRepository(session)
-    tokens = RedisTokenStore(redis)
-    storage = LocalObjectStorage(settings.storage_path)
-    embeddings = OpenAICompatibleEmbeddings(
-        settings.openai_api_key, settings.openai_base_url, settings.openai_embedding_model
-    )
-    llm = OpenAICompatibleLLM(
-        settings.openai_api_key, settings.openai_base_url, settings.openai_chat_model
-    )
-    vectors = QdrantVectorStore(settings.qdrant_url, settings.qdrant_collection)
-    decision_service = DecisionIntelligenceService(
-        kpis=kpis,
-        documents=documents,
-        chunks=chunks,
-        decisions=decisions_repo,
-        llm=llm,
-        audit=audit,
-    )
+# ── Repository factories ──────────────────────────────────────────────────────
 
-    yield Services(
-        auth=AuthService(
-            users=users,
-            tokens=tokens,
-            audit=audit,
-            jwt_secret=settings.jwt_secret,
-            jwt_algorithm=settings.jwt_algorithm,
-            access_ttl_minutes=settings.jwt_access_ttl_minutes,
-            refresh_ttl_days=settings.jwt_refresh_ttl_days,
-        ),
-        documents=DocumentService(
-            documents=documents,
-            storage=storage,
-            jobs=jobs,
-            audit=audit,
-        ),
-        kpis=KPIService(kpis=kpis),
-        dashboard=DashboardService(
-            kpis=kpis, documents=documents, decisions=decisions_repo
-        ),
-        chat=ChatService(
-            chats=chats,
-            chunks=chunks,
-            embeddings=embeddings,
-            llm=llm,
-            vectors=vectors,
-            audit=audit,
-            top_k=settings.rag_top_k,
-        ),
-        decisions=decision_service,
-        reports=ReportService(
-            decisions=decisions_repo,
-            decision_service=decision_service,
-            audit=audit,
-        ),
+def get_user_repo(session=Depends(get_db_session)) -> UserRepository:
+    return UserRepository(session)
+
+
+def get_doc_repo(session=Depends(get_db_session)) -> DocumentRepository:
+    return DocumentRepository(session)
+
+
+def get_chunk_repo(session=Depends(get_db_session)) -> ChunkRepository:
+    return ChunkRepository(session)
+
+
+def get_kpi_repo(session=Depends(get_db_session)) -> KPIRepository:
+    return KPIRepository(session)
+
+
+def get_session_repo(session=Depends(get_db_session)) -> ChatSessionRepository:
+    return ChatSessionRepository(session)
+
+
+def get_message_repo(session=Depends(get_db_session)) -> ChatMessageRepository:
+    return ChatMessageRepository(session)
+
+
+def get_audit_repo(session=Depends(get_db_session)) -> AuditRepository:
+    return AuditRepository(session)
+
+
+# ── Infrastructure singletons ─────────────────────────────────────────────────
+
+def get_security(settings: SettingsDep) -> SecurityHelper:
+    return SecurityHelper(
+        secret=settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+        access_ttl_minutes=settings.jwt_access_ttl_minutes,
+        refresh_ttl_days=settings.jwt_refresh_ttl_days,
+        redis_client=get_redis(),
     )
 
+
+def get_storage(settings: SettingsDep) -> LocalFileStorage:
+    return LocalFileStorage(settings.storage_path)
+
+
+def get_task_queue(settings: SettingsDep) -> ArqTaskQueue:
+    return ArqTaskQueue(settings.redis_url)
+
+
+def get_llm(settings: SettingsDep) -> OpenAILLMClient:
+    return OpenAILLMClient(
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url,
+        model=settings.openai_chat_model,
+    )
+
+
+def get_embeddings(settings: SettingsDep) -> OpenAIEmbeddingClient:
+    return OpenAIEmbeddingClient(
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url,
+        model=settings.openai_embedding_model,
+        dimensions=settings.openai_embedding_dimensions,
+    )
+
+
+def get_vector_store(settings: SettingsDep) -> QdrantVectorStore:
+    return QdrantVectorStore(settings.qdrant_url, settings.qdrant_collection)
+
+
+# ── Service factories ─────────────────────────────────────────────────────────
+
+def get_audit_service(audit_repo: AuditRepository = Depends(get_audit_repo)) -> AuditService:
+    return AuditService(audit_repo)
+
+
+def get_auth_service(
+    user_repo: UserRepository = Depends(get_user_repo),
+    security: SecurityHelper = Depends(get_security),
+    audit: AuditService = Depends(get_audit_service),
+) -> AuthService:
+    return AuthService(user_repo, security, audit)
+
+
+def get_document_service(
+    doc_repo: DocumentRepository = Depends(get_doc_repo),
+    storage: LocalFileStorage = Depends(get_storage),
+    queue: ArqTaskQueue = Depends(get_task_queue),
+    audit: AuditService = Depends(get_audit_service),
+) -> DocumentService:
+    return DocumentService(doc_repo, storage, queue, audit)
+
+
+def get_kpi_service(
+    kpi_repo: KPIRepository = Depends(get_kpi_repo),
+) -> KPIService:
+    return KPIService(kpi_repo)
+
+
+def get_dashboard_service(
+    kpi_repo: KPIRepository = Depends(get_kpi_repo),
+) -> DashboardService:
+    return DashboardService(kpi_repo)
+
+
+def get_chat_service(
+    settings: SettingsDep,
+    session_repo: ChatSessionRepository = Depends(get_session_repo),
+    message_repo: ChatMessageRepository = Depends(get_message_repo),
+    chunk_repo: ChunkRepository = Depends(get_chunk_repo),
+    embeddings: OpenAIEmbeddingClient = Depends(get_embeddings),
+    vectors: QdrantVectorStore = Depends(get_vector_store),
+    llm: OpenAILLMClient = Depends(get_llm),
+    audit: AuditService = Depends(get_audit_service),
+) -> ChatService:
+    return ChatService(
+        session_repo=session_repo,
+        message_repo=message_repo,
+        chunk_repo=chunk_repo,
+        embedding_client=embeddings,
+        vector_store=vectors,
+        llm_client=llm,
+        qdrant_collection=settings.qdrant_collection,
+        audit_service=audit,
+    )
+
+
+# ── Current user ──────────────────────────────────────────────────────────────
 
 async def get_current_user(
-    authorization: str | None = Header(default=None),
-    services: Services = Depends(get_services),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    user_repo: UserRepository = Depends(get_user_repo),
+    security: SecurityHelper = Depends(get_security),
 ) -> User:
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
-    token = authorization.split(" ", 1)[1].strip()
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header.")
+    token = credentials.credentials
     try:
-        return await services.auth.resolve_user(token)
+        payload = security.decode_access_token(token)
     except AuthenticationError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    jti = payload.get("jti", "")
+    if jti and await security.is_blacklisted(jti):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked.")
+
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload.")
+
+    user = await user_repo.get_by_id(uuid.UUID(user_id_str))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is disabled.")
+    return user
+
+
+CurrentUser = Annotated[User, Depends(get_current_user)]

@@ -1,19 +1,30 @@
-from io import BytesIO
-from pathlib import Path
+"""PDF parser – converts PDF bytes to markdown-ish text using pypdf."""
+
+from __future__ import annotations
+
+import io
+import logging
 
 from pypdf import PdfReader
 
+from stratiq.domain.exceptions import ProcessingError
 
-class PdfParser:
-    def supports(self, filename: str, content_type: str) -> bool:
-        ext = Path(filename).suffix.lower()
-        return ext == ".pdf" or "pdf" in (content_type or "").lower()
+logger = logging.getLogger(__name__)
 
-    def parse(self, data: bytes, filename: str) -> str:
-        reader = PdfReader(BytesIO(data))
-        pages: list[str] = []
-        for index, page in enumerate(reader.pages):
-            text = (page.extract_text() or "").strip()
-            if text:
-                pages.append(f"## Page {index + 1}\n\n{text}")
-        return f"# {filename}\n\n" + "\n\n".join(pages)
+
+class PDFParser:
+    """Parse PDF files into plain markdown text."""
+
+    def parse(self, data: bytes) -> str:
+        try:
+            reader = PdfReader(io.BytesIO(data))
+            pages: list[str] = []
+            for page_num, page in enumerate(reader.pages, start=1):
+                text = page.extract_text() or ""
+                if text.strip():
+                    pages.append(f"## Page {page_num}\n\n{text.strip()}")
+            result = "\n\n".join(pages)
+            logger.debug("PDF parsed", extra={"pages": len(pages), "chars": len(result)})
+            return result
+        except Exception as exc:
+            raise ProcessingError(f"PDF parsing failed: {exc}") from exc

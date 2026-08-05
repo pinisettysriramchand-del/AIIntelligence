@@ -1,442 +1,300 @@
+"""Shared pytest fixtures for unit and integration tests."""
+
 from __future__ import annotations
 
+import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID, uuid4
 
 import pytest
+import pytest_asyncio
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
-from stratiq.application.auth import AuthService
-from stratiq.application.chat import ChatService
-from stratiq.application.decisions import DecisionIntelligenceService
-from stratiq.application.documents import DocumentService
-from stratiq.application.kpis import DashboardService, KPIService
-from stratiq.application.reports import ReportService
-from stratiq.domain.entities import (
-    ChatMessage,
-    ChatSession,
-    Chunk,
-    Citation,
-    DecisionCard,
-    Document,
-    ExecutiveReport,
-    KPI,
-    User,
-)
-from stratiq.domain.enums import DocumentStatus
-from stratiq.interface.app_factory import create_app
-from stratiq.interface.deps import Services, get_services
+from stratiq.config import Settings
+from stratiq.infrastructure.db.models import Base
+
+# ── In-memory SQLite with a single shared connection (StaticPool) ─────────────
+
+TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 
-class InMemoryUsers:
+@pytest.fixture(scope="session")
+def test_settings() -> Settings:
+    return Settings(
+        database_url=TEST_DB_URL,
+        redis_url="redis://localhost:6379/15",
+        qdrant_url="http://localhost:6333",
+        qdrant_collection="test_chunks",
+        jwt_secret="test-secret-key-for-tests-only-must-be-long-enough",
+        jwt_access_ttl_minutes=60,
+        jwt_refresh_ttl_days=7,
+        storage_path="/tmp/stratiq_test_storage",
+        openai_api_key="sk-test",
+        openai_base_url="http://localhost:9999/v1",
+        openai_chat_model="gpt-test",
+        openai_embedding_model="embed-test",
+        openai_embedding_dimensions=4,
+        cors_origins=["http://localhost:3000"],
+    )
+
+
+@pytest_asyncio.fixture(scope="session")
+async def db_engine(test_settings: Settings):
+    """Session-scoped engine with StaticPool so all tests share the same SQLite :memory: db."""
+    engine = create_async_engine(
+        TEST_DB_URL,
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+        await session.rollback()
+
+
+# ── Fake infrastructure ───────────────────────────────────────────────────────
+
+class FakeStorage:
     def __init__(self) -> None:
-        self.items: dict[UUID, User] = {}
+        self._store: dict[str, bytes] = {}
 
-    async def create(self, email: str, password_hash: str, full_name: str) -> User:
-        user = User(
-            id=uuid4(),
-            email=email,
-            password_hash=password_hash,
-            full_name=full_name,
-            created_at=datetime.now(UTC),
-        )
-        self.items[user.id] = user
-        return user
-
-    async def get_by_email(self, email: str) -> User | None:
-        for user in self.items.values():
-            if user.email == email:
-                return user
-        return None
-
-    async def get_by_id(self, user_id: UUID) -> User | None:
-        return self.items.get(user_id)
-
-
-class InMemoryDocuments:
-    def __init__(self) -> None:
-        self.items: dict[UUID, Document] = {}
-
-    async def create(self, document: Document) -> Document:
-        self.items[document.id] = document
-        return document
-
-    async def get(self, document_id: UUID, owner_id: UUID) -> Document | None:
-        doc = self.items.get(document_id)
-        if doc and doc.owner_id == owner_id:
-            return doc
-        return None
-
-    async def get_by_id(self, document_id: UUID) -> Document | None:
-        return self.items.get(document_id)
-
-    async def list_for_owner(self, owner_id: UUID) -> list[Document]:
-        return [d for d in self.items.values() if d.owner_id == owner_id]
-
-    async def update(self, document: Document) -> Document:
-        self.items[document.id] = document
-        return document
-
-
-class InMemoryChunks:
-    def __init__(self) -> None:
-        self.items: dict[UUID, list[Chunk]] = {}
-
-    async def replace_for_document(self, document_id: UUID, chunks: list[Chunk]) -> list[Chunk]:
-        self.items[document_id] = chunks
-        return chunks
-
-    async def list_for_document(self, document_id: UUID) -> list[Chunk]:
-        return self.items.get(document_id, [])
-
-    async def get_many(self, chunk_ids: list[UUID]) -> list[Chunk]:
-        found = []
-        for chunks in self.items.values():
-            for chunk in chunks:
-                if chunk.id in chunk_ids:
-                    found.append(chunk)
-        return found
-
-
-class InMemoryKPIs:
-    def __init__(self) -> None:
-        self.items: list[KPI] = []
-
-    async def replace_for_document(self, document_id: UUID, kpis: list[KPI]) -> list[KPI]:
-        self.items = [k for k in self.items if k.document_id != document_id] + kpis
-        return kpis
-
-    async def list_for_owner(self, owner_id: UUID, document_id: UUID | None = None) -> list[KPI]:
-        result = [k for k in self.items if k.owner_id == owner_id]
-        if document_id:
-            result = [k for k in result if k.document_id == document_id]
-        return result
-
-    async def get(self, kpi_id: UUID, owner_id: UUID) -> KPI | None:
-        for kpi in self.items:
-            if kpi.id == kpi_id and kpi.owner_id == owner_id:
-                return kpi
-        return None
-
-
-class InMemoryDecisions:
-    def __init__(self) -> None:
-        self.cards: list[DecisionCard] = []
-        self.reports: list[ExecutiveReport] = []
-
-    async def replace_cards(
-        self,
-        owner_id: UUID,
-        cards: list[DecisionCard],
-        document_id: UUID | None = None,
-    ) -> list[DecisionCard]:
-        kept = [c for c in self.cards if c.owner_id != owner_id]
-        if document_id is not None:
-            kept = [
-                c
-                for c in self.cards
-                if not (c.owner_id == owner_id and c.document_id == document_id)
-            ]
-        self.cards = kept + cards
-        return cards
-
-    async def list_cards(
-        self, owner_id: UUID, document_id: UUID | None = None
-    ) -> list[DecisionCard]:
-        result = [c for c in self.cards if c.owner_id == owner_id]
-        if document_id:
-            result = [c for c in result if c.document_id == document_id]
-        return result
-
-    async def get_card(self, card_id: UUID, owner_id: UUID) -> DecisionCard | None:
-        for card in self.cards:
-            if card.id == card_id and card.owner_id == owner_id:
-                return card
-        return None
-
-    async def save_executive_report(self, report: ExecutiveReport) -> ExecutiveReport:
-        self.reports.append(report)
-        return report
-
-    async def get_latest_executive_report(
-        self, owner_id: UUID, document_id: UUID | None = None
-    ) -> ExecutiveReport | None:
-        items = [r for r in self.reports if r.owner_id == owner_id]
-        if document_id:
-            items = [r for r in items if r.document_id == document_id]
-        return items[-1] if items else None
-
-
-class InMemoryChats:
-    def __init__(self) -> None:
-        self.sessions: dict[UUID, ChatSession] = {}
-        self.messages: dict[UUID, list[ChatMessage]] = {}
-
-    async def create_session(self, owner_id: UUID, title: str) -> ChatSession:
-        session = ChatSession(id=uuid4(), owner_id=owner_id, title=title, created_at=datetime.now(UTC))
-        self.sessions[session.id] = session
-        self.messages[session.id] = []
-        return session
-
-    async def get_session(self, session_id: UUID, owner_id: UUID) -> ChatSession | None:
-        session = self.sessions.get(session_id)
-        if session and session.owner_id == owner_id:
-            return session
-        return None
-
-    async def list_sessions(self, owner_id: UUID) -> list[ChatSession]:
-        return [s for s in self.sessions.values() if s.owner_id == owner_id]
-
-    async def add_message(
-        self,
-        session_id: UUID,
-        role: str,
-        content: str,
-        citations: list[Citation] | None = None,
-    ) -> ChatMessage:
-        message = ChatMessage(
-            id=uuid4(),
-            session_id=session_id,
-            role=role,
-            content=content,
-            citations=citations or [],
-            created_at=datetime.now(UTC),
-        )
-        self.messages.setdefault(session_id, []).append(message)
-        return message
-
-    async def list_messages(self, session_id: UUID, owner_id: UUID) -> list[ChatMessage]:
-        session = await self.get_session(session_id, owner_id)
-        if not session:
-            return []
-        return self.messages.get(session_id, [])
-
-
-class InMemoryAudit:
-    def __init__(self) -> None:
-        self.events: list[dict[str, Any]] = []
-
-    async def record(
-        self,
-        action: str,
-        actor_id: UUID | None,
-        resource_type: str | None = None,
-        resource_id: str | None = None,
-        details: dict[str, Any] | None = None,
-    ) -> None:
-        self.events.append(
-            {
-                "action": action,
-                "actor_id": actor_id,
-                "resource_type": resource_type,
-                "resource_id": resource_id,
-                "details": details or {},
-            }
-        )
-
-
-class InMemoryTokens:
-    def __init__(self) -> None:
-        self.refresh: set[str] = set()
-        self.blacklist: set[str] = set()
-
-    async def store_refresh(self, user_id: UUID, token_id: str, ttl_seconds: int) -> None:
-        self.refresh.add(f"{user_id}:{token_id}")
-
-    async def revoke_refresh(self, user_id: UUID, token_id: str) -> None:
-        self.refresh.discard(f"{user_id}:{token_id}")
-
-    async def is_refresh_valid(self, user_id: UUID, token_id: str) -> bool:
-        return f"{user_id}:{token_id}" in self.refresh
-
-    async def blacklist_access(self, jti: str, ttl_seconds: int) -> None:
-        self.blacklist.add(jti)
-
-    async def is_access_blacklisted(self, jti: str) -> bool:
-        return jti in self.blacklist
-
-
-class InMemoryStorage:
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-
-    async def put(self, key: str, data: bytes, content_type: str) -> str:
-        self.objects[key] = data
+    async def save(self, key: str, data: bytes, content_type: str) -> str:
+        self._store[key] = data
         return key
 
-    async def get(self, key: str) -> bytes:
-        return self.objects[key]
+    async def load(self, key: str) -> bytes:
+        if key not in self._store:
+            from stratiq.domain.exceptions import StorageError
+            raise StorageError(f"Not found: {key}")
+        return self._store[key]
 
     async def delete(self, key: str) -> None:
-        self.objects.pop(key, None)
+        self._store.pop(key, None)
+
+    async def exists(self, key: str) -> bool:
+        return key in self._store
 
 
-class InMemoryJobs:
-    def __init__(self) -> None:
-        self.jobs: list[str] = []
+class FakeLLMClient:
+    def __init__(self, chat_response: str = "Test answer", json_response: dict[str, Any] | None = None) -> None:
+        self._chat = chat_response
+        self._json = json_response or {}
 
-    async def enqueue_process_document(self, document_id: str) -> str:
-        self.jobs.append(document_id)
-        return f"job-{document_id}"
+    async def chat_completion(self, messages: list, temperature: float = 0.7, max_tokens: int = 1024) -> str:
+        return self._chat
+
+    async def json_completion(self, messages: list, temperature: float = 0.0, max_tokens: int = 1024) -> dict:
+        return self._json
 
 
-class FakeEmbeddings:
+class FakeEmbeddingClient:
+    def __init__(self, dims: int = 4) -> None:
+        self._dims = dims
+
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[float(len(t) % 7), 0.1, 0.2] for t in texts]
+        return [[0.1] * self._dims for _ in texts]
+
+    async def embed_one(self, text: str) -> list[float]:
+        return [0.1] * self._dims
 
 
-class FakeLLM:
-    async def complete_json(self, system: str, user: str) -> dict[str, Any]:
-        if "Decision Intelligence" in system:
-            # Extract first kpi id from user payload if present
-            kpi_id = "00000000-0000-0000-0000-000000000001"
-            for line in user.splitlines():
-                if line.strip().startswith("- id="):
-                    kpi_id = line.split("id=", 1)[1].split(" ", 1)[0]
-                    break
-            return {
-                "executive_summary": "Performance is stable with actionable upside in revenue.",
-                "health_score": 78,
-                "timeline": [
-                    {
-                        "title": "Revenue review",
-                        "detail": "Revenue held at target; monitor margin pressure.",
-                        "severity": "medium",
-                    }
-                ],
-                "cards": [
-                    {
-                        "kpi_id": kpi_id,
-                        "kpi_name": "Revenue",
-                        "trend": "up",
-                        "health": "healthy",
-                        "what_happened": "Revenue reached the reported value in the period.",
-                        "why_it_happened": "Evidence indicates demand held and pricing remained stable.",
-                        "risks": ["Margin compression if input costs rise"],
-                        "opportunities": ["Expand top-performing channels"],
-                        "recommendation": "Protect pricing discipline and scale winning channels.",
-                        "forecast_value": "260",
-                        "forecast_horizon": "next quarter",
-                        "forecast_explanation": "Continuation of current demand trajectory.",
-                        "evidence_chunk_ids": [],
-                        "related_kpi_ids": [],
-                    }
-                ],
-            }
-        return {"industry": "Retail", "confidence": 0.9, "kpis": []}
-
-    async def complete_text(self, system: str, user: str) -> str:
-        return "Based on evidence, revenue is stable. [chunk:demo]"
-
-
-class FakeVectors:
+class FakeVectorStore:
     def __init__(self) -> None:
-        self.points: list[dict[str, Any]] = []
+        self._points: list[dict] = []
 
-    async def ensure_collection(self, vector_size: int) -> None:
-        return None
-
-    async def upsert_chunks(self, points: list[dict[str, Any]]) -> None:
-        self.points.extend(points)
+    async def upsert(self, collection: str, points: list[dict]) -> None:
+        self._points.extend(points)
 
     async def search(
-        self,
-        vector: list[float],
-        owner_id: str,
-        top_k: int,
-        document_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        hits = []
-        for point in self.points:
-            payload = point["payload"]
-            if payload.get("owner_id") != owner_id:
-                continue
-            if document_id and payload.get("document_id") != document_id:
-                continue
-            hits.append({"id": point["id"], "score": 0.9, "payload": payload})
-            if len(hits) >= top_k:
-                break
-        return hits
+        self, collection: str, query_vector: list, top_k: int, filter_payload: dict | None = None
+    ) -> list[dict]:
+        return []
 
-    async def delete_document(self, document_id: str) -> None:
-        self.points = [p for p in self.points if p["payload"].get("document_id") != document_id]
+    async def delete_by_document(self, collection: str, document_id: uuid.UUID) -> None:
+        self._points = [
+            p for p in self._points if p.get("payload", {}).get("document_id") != str(document_id)
+        ]
 
 
-@pytest.fixture
-def memory_stack():
-    users = InMemoryUsers()
-    documents = InMemoryDocuments()
-    chunks = InMemoryChunks()
-    kpis = InMemoryKPIs()
-    chats = InMemoryChats()
-    decisions = InMemoryDecisions()
-    audit = InMemoryAudit()
-    tokens = InMemoryTokens()
-    storage = InMemoryStorage()
-    jobs = InMemoryJobs()
-    vectors = FakeVectors()
-    embeddings = FakeEmbeddings()
-    llm = FakeLLM()
-    decision_service = DecisionIntelligenceService(
-        kpis=kpis,
-        documents=documents,
-        chunks=chunks,
-        decisions=decisions,
-        llm=llm,
-        audit=audit,
-    )
+class FakeTaskQueue:
+    def __init__(self) -> None:
+        self.jobs: list[dict] = []
 
-    services = Services(
-        auth=AuthService(
-            users=users,
-            tokens=tokens,
-            audit=audit,
-            jwt_secret="test-secret-key-please-change-32b!",
-            jwt_algorithm="HS256",
-            access_ttl_minutes=30,
-            refresh_ttl_days=7,
-        ),
-        documents=DocumentService(documents=documents, storage=storage, jobs=jobs, audit=audit),
-        kpis=KPIService(kpis=kpis),
-        dashboard=DashboardService(kpis=kpis, documents=documents, decisions=decisions),
-        chat=ChatService(
-            chats=chats,
-            chunks=chunks,
-            embeddings=embeddings,
-            llm=llm,
-            vectors=vectors,
-            audit=audit,
-            top_k=5,
-        ),
-        decisions=decision_service,
-        reports=ReportService(
-            decisions=decisions,
-            decision_service=decision_service,
-            audit=audit,
-        ),
-    )
-    return {
-        "services": services,
-        "documents": documents,
-        "kpis": kpis,
-        "chunks": chunks,
-        "decisions": decisions,
-        "jobs": jobs,
-        "storage": storage,
-        "vectors": vectors,
-    }
+    async def enqueue(self, function_name: str, **kwargs: Any) -> str:
+        job_id = str(uuid.uuid4())
+        self.jobs.append({"function": function_name, "kwargs": kwargs, "job_id": job_id})
+        return job_id
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self._store: dict[str, bytes] = {}
+
+    async def setex(self, name: str, time: int, value: Any) -> None:
+        self._store[name] = str(value).encode() if isinstance(value, str) else value
+
+    async def get(self, name: str) -> bytes | None:
+        return self._store.get(name)
+
+    async def exists(self, name: str) -> int:
+        return 1 if name in self._store else 0
+
+    async def delete(self, name: str) -> None:
+        self._store.pop(name, None)
+
+    async def aclose(self) -> None:
+        pass
+
+
+class FakeAuditRepo:
+    def __init__(self) -> None:
+        self.events: list = []
+
+    async def save(self, event: Any) -> None:
+        self.events.append(event)
 
 
 @pytest.fixture
-async def client(memory_stack):
-    app = create_app(initialize_resources=False)
+def fake_storage() -> FakeStorage:
+    return FakeStorage()
 
-    async def override_services():
-        yield memory_stack["services"]
 
-    app.dependency_overrides[get_services] = override_services
+@pytest.fixture
+def fake_llm() -> FakeLLMClient:
+    return FakeLLMClient()
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+
+@pytest.fixture
+def fake_embeddings() -> FakeEmbeddingClient:
+    return FakeEmbeddingClient()
+
+
+@pytest.fixture
+def fake_vector_store() -> FakeVectorStore:
+    return FakeVectorStore()
+
+
+@pytest.fixture
+def fake_queue() -> FakeTaskQueue:
+    return FakeTaskQueue()
+
+
+@pytest.fixture
+def fake_redis() -> FakeRedis:
+    return FakeRedis()
+
+
+@pytest.fixture
+def fake_audit_repo() -> FakeAuditRepo:
+    return FakeAuditRepo()
+
+
+# ── App + HTTP client ──────────────────────────────────────────────────────────
+
+@pytest_asyncio.fixture
+async def app(test_settings: Settings, db_engine, fake_redis: FakeRedis) -> FastAPI:
+    """FastAPI app wired to the shared SQLite engine + fake infrastructure."""
+    from contextlib import asynccontextmanager
+    from typing import AsyncGenerator as AG
+
+    from stratiq.infrastructure.auth.security import SecurityHelper
+    from stratiq.infrastructure.db.session import get_db_session
+    from stratiq.interface import deps as _deps
+
+    _session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async def _get_test_session() -> AsyncGenerator[AsyncSession, None]:
+        async with _session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    _security = SecurityHelper(
+        secret=test_settings.jwt_secret,
+        algorithm=test_settings.jwt_algorithm,
+        access_ttl_minutes=test_settings.jwt_access_ttl_minutes,
+        refresh_ttl_days=test_settings.jwt_refresh_ttl_days,
+        redis_client=fake_redis,
+    )
+
+    _fake_storage = FakeStorage()
+    _fake_queue = FakeTaskQueue()
+
+    @asynccontextmanager
+    async def _noop_lifespan(application: FastAPI) -> AG[None, None]:
+        yield
+
+    from fastapi import FastAPI as _FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    from stratiq.interface.app_factory import _register_exception_handlers
+    from stratiq.interface.routers import auth, chat, dashboard, documents, kpis
+
+    _app = _FastAPI(title="StratIQ Test", lifespan=_noop_lifespan)
+    _app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    _register_exception_handlers(_app)
+    _app.include_router(auth.router, prefix="/api/v1")
+    _app.include_router(documents.router, prefix="/api/v1")
+    _app.include_router(kpis.router, prefix="/api/v1")
+    _app.include_router(dashboard.router, prefix="/api/v1")
+    _app.include_router(chat.router, prefix="/api/v1")
+
+    @_app.get("/health")
+    async def health() -> dict:
+        return {"status": "ok", "service": "StratIQ Test"}
+
+    # Wire overrides
+    _app.dependency_overrides[get_db_session] = _get_test_session
+    _app.dependency_overrides[_deps.get_settings] = lambda: test_settings
+    _app.dependency_overrides[_deps.get_security] = lambda: _security
+    _app.dependency_overrides[_deps.get_storage] = lambda: _fake_storage
+    _app.dependency_overrides[_deps.get_task_queue] = lambda: _fake_queue
+
+    return _app
+
+
+@pytest_asyncio.fixture
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+
+
+@pytest_asyncio.fixture
+async def auth_client(client: AsyncClient) -> AsyncGenerator[tuple[AsyncClient, dict], None]:
+    """Return (client, headers) for a freshly registered + logged-in user."""
+    email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "password123", "full_name": "Test User"},
+    )
+    assert reg.status_code == 201, f"Register failed: {reg.text}"
+
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "password123"},
+    )
+    assert login.status_code == 200, f"Login failed: {login.text}"
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    yield client, headers

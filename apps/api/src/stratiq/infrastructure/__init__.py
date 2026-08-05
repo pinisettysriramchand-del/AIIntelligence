@@ -1,1 +1,1 @@
-# Package markers
+"""Infrastructure layer – concrete adapters for ports."""

@@ -1,36 +1,53 @@
-from io import BytesIO
-from pathlib import Path
+"""Tabular file parser – converts XLSX/CSV to markdown tables."""
+
+from __future__ import annotations
+
+import io
+import logging
 
 import pandas as pd
 
+from stratiq.domain.exceptions import ProcessingError
+
+logger = logging.getLogger(__name__)
+
+_MAX_ROWS_PER_SHEET = 200
+
 
 class TabularParser:
-    def supports(self, filename: str, content_type: str) -> bool:
-        ext = Path(filename).suffix.lower()
-        return ext in {".csv", ".xlsx", ".xls"} or any(
-            token in (content_type or "").lower()
-            for token in ("csv", "spreadsheet", "excel")
-        )
+    """Parse Excel (.xlsx, .xls) and CSV files into markdown."""
 
-    def parse(self, data: bytes, filename: str) -> str:
-        ext = Path(filename).suffix.lower()
-        if ext == ".csv":
-            frame = pd.read_csv(BytesIO(data))
-            return self._frame_to_markdown(filename, frame)
-        frame_dict = pd.read_excel(BytesIO(data), sheet_name=None)
-        sections = [f"# {filename}"]
-        for sheet_name, frame in frame_dict.items():
-            sections.append(self._frame_to_markdown(str(sheet_name), frame, heading_level=2))
-        return "\n\n".join(sections)
+    def __init__(self, file_extension: str) -> None:
+        self._ext = file_extension.lower().lstrip(".")
 
-    @staticmethod
-    def _frame_to_markdown(title: str, frame: pd.DataFrame, heading_level: int = 1) -> str:
-        heading = "#" * heading_level
-        if frame.empty:
-            return f"{heading} {title}\n\n_No rows_"
-        preview = frame.head(200)
+    def parse(self, data: bytes) -> str:
         try:
-            table = preview.to_markdown(index=False)
-        except ImportError:
-            table = preview.to_string(index=False)
-        return f"{heading} {title}\n\n{table}"
+            if self._ext in ("xlsx", "xls"):
+                return self._parse_excel(data)
+            elif self._ext == "csv":
+                return self._parse_csv(data)
+            else:
+                raise ProcessingError(f"Unsupported tabular format: {self._ext}")
+        except ProcessingError:
+            raise
+        except Exception as exc:
+            raise ProcessingError(f"Tabular parsing failed: {exc}") from exc
+
+    def _parse_excel(self, data: bytes) -> str:
+        xf = pd.ExcelFile(io.BytesIO(data))
+        sections: list[str] = []
+        for sheet_name in xf.sheet_names:
+            df = pd.read_excel(xf, sheet_name=sheet_name, nrows=_MAX_ROWS_PER_SHEET)
+            df = df.dropna(how="all")
+            md = df.to_markdown(index=False)
+            sections.append(f"## Sheet: {sheet_name}\n\n{md}")
+        result = "\n\n".join(sections)
+        logger.debug("Excel parsed", extra={"sheets": len(sections), "chars": len(result)})
+        return result
+
+    def _parse_csv(self, data: bytes) -> str:
+        df = pd.read_csv(io.BytesIO(data), nrows=_MAX_ROWS_PER_SHEET)
+        df = df.dropna(how="all")
+        result = df.to_markdown(index=False)
+        logger.debug("CSV parsed", extra={"rows": len(df), "chars": len(result)})
+        return result or ""

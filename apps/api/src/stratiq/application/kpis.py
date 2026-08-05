@@ -1,96 +1,37 @@
+"""KPI use-cases: list, get, filter by domain."""
+
 from __future__ import annotations
 
-from collections import defaultdict
-from uuid import UUID
+import uuid
+from typing import Any
 
-from stratiq.application.ports import DecisionRepository, DocumentRepository, KPIRepository
 from stratiq.domain.entities import KPI
-from stratiq.domain.enums import DocumentStatus
+from stratiq.domain.enums import KPIDomain
+from stratiq.domain.exceptions import AuthorizationError, NotFoundError
 
 
 class KPIService:
-    def __init__(self, kpis: KPIRepository) -> None:
-        self._kpis = kpis
+    def __init__(self, kpi_repo: "KPIRepository") -> None:  # noqa: F821
+        self._repo = kpi_repo
 
-    async def list_for_owner(self, owner_id: UUID, document_id: UUID | None = None) -> list[KPI]:
-        return await self._kpis.list_for_owner(owner_id, document_id)
-
-
-class DashboardService:
-    def __init__(
+    async def list_kpis(
         self,
-        kpis: KPIRepository,
-        documents: DocumentRepository,
-        decisions: DecisionRepository | None = None,
-    ) -> None:
-        self._kpis = kpis
-        self._documents = documents
-        self._decisions = decisions
+        owner_id: uuid.UUID,
+        document_id: uuid.UUID | None = None,
+        domain: KPIDomain | None = None,
+    ) -> list[KPI]:
+        return await self._repo.list_by_owner(owner_id, document_id=document_id, domain=domain)
 
-    async def build(self, owner_id: UUID) -> dict:
-        documents = await self._documents.list_for_owner(owner_id)
-        kpis = await self._kpis.list_for_owner(owner_id)
-        by_domain: dict[str, list[KPI]] = defaultdict(list)
-        for kpi in kpis:
-            by_domain[kpi.domain or "General"].append(kpi)
+    async def get_kpi(self, kpi_id: uuid.UUID, owner_id: uuid.UUID) -> KPI:
+        kpi = await self._repo.get_by_id(kpi_id)
+        if kpi is None:
+            raise NotFoundError("KPI", kpi_id)
+        if kpi.owner_id != owner_id:
+            raise AuthorizationError("You do not own this KPI.")
+        return kpi
 
-        ready = sum(1 for d in documents if d.status == DocumentStatus.READY)
-        failed = sum(1 for d in documents if d.status == DocumentStatus.FAILED)
-        processing = sum(1 for d in documents if d.status == DocumentStatus.PROCESSING)
-
-        cards = []
-        report = None
-        if self._decisions is not None:
-            cards = await self._decisions.list_cards(owner_id)
-            report = await self._decisions.get_latest_executive_report(owner_id)
-
-        return {
-            "summary": {
-                "document_count": len(documents),
-                "ready_documents": ready,
-                "processing_documents": processing,
-                "failed_documents": failed,
-                "kpi_count": len(kpis),
-                "domains": sorted(by_domain.keys()),
-                "health_score": report.health_score if report else None,
-                "health_label": report.health_label if report else None,
-                "decision_card_count": len(cards),
-            },
-            "executive_summary": report.summary if report else None,
-            "timeline": report.timeline if report else [],
-            "decision_cards": [
-                {
-                    "id": str(c.id),
-                    "kpi_name": c.kpi_name,
-                    "current_value": c.current_value,
-                    "unit": c.unit,
-                    "trend": c.trend,
-                    "health": c.health,
-                    "recommendation": c.recommendation,
-                }
-                for c in cards[:8]
-            ],
-            "kpis": [
-                {
-                    "id": str(k.id),
-                    "document_id": str(k.document_id),
-                    "name": k.name,
-                    "value": k.value,
-                    "unit": k.unit,
-                    "period": k.period,
-                    "domain": k.domain,
-                    "evidence_chunk_ids": k.evidence_chunk_ids,
-                }
-                for k in kpis
-            ],
-            "documents": [
-                {
-                    "id": str(d.id),
-                    "filename": d.filename,
-                    "status": d.status,
-                    "domain": d.domain,
-                    "domain_confidence": d.domain_confidence,
-                }
-                for d in documents
-            ],
-        }
+    async def get_evidence_chunks(
+        self, kpi_id: uuid.UUID, owner_id: uuid.UUID, chunk_repo: "ChunkRepository"  # noqa: F821
+    ) -> list[Any]:
+        kpi = await self.get_kpi(kpi_id, owner_id)
+        return await chunk_repo.get_by_ids(kpi.evidence_chunk_ids)

@@ -1,171 +1,155 @@
-from datetime import UTC, datetime
-from typing import Any
-from uuid import uuid4
+"""SQLAlchemy ORM models (async, declarative).
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+Uses generic SQLAlchemy types (Uuid, JSON) that work with both PostgreSQL and SQLite,
+enabling the test suite to run against an in-memory SQLite database.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON as GenericJSON
+from sqlalchemy import Uuid as GenericUuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.types import JSON
 
 
 class Base(DeclarativeBase):
     pass
 
 
-JsonType = JSON().with_variant(JSONB(), "postgresql")
-
-
-def utcnow() -> datetime:
-    return datetime.now(UTC)
+def _uuid() -> uuid.UUID:
+    return uuid.uuid4()
 
 
 class UserModel(Base):
     __tablename__ = "users"
 
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
-    full_name: Mapped[str] = mapped_column(String(200))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    documents: Mapped[list[DocumentModel]] = relationship("DocumentModel", back_populates="owner", lazy="noload")
+    chat_sessions: Mapped[list[ChatSessionModel]] = relationship(
+        "ChatSessionModel", back_populates="owner", lazy="noload"
+    )
 
 
 class DocumentModel(Base):
     __tablename__ = "documents"
 
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    owner_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
-    filename: Mapped[str] = mapped_column(String(512))
-    content_type: Mapped[str] = mapped_column(String(255))
-    storage_key: Mapped[str] = mapped_column(String(1024))
-    status: Mapped[str] = mapped_column(String(32), index=True)
-    document_type: Mapped[str] = mapped_column(String(32))
-    domain: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    domain_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="uploaded")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    chunks = relationship("ChunkModel", back_populates="document", cascade="all, delete-orphan")
-    kpis = relationship("KPIModel", back_populates="document", cascade="all, delete-orphan")
+    owner: Mapped[UserModel] = relationship("UserModel", back_populates="documents", lazy="noload")
+    chunks: Mapped[list[ChunkModel]] = relationship("ChunkModel", back_populates="document", lazy="noload")
+    kpis: Mapped[list[KPIModel]] = relationship("KPIModel", back_populates="document", lazy="noload")
 
 
 class ChunkModel(Base):
     __tablename__ = "chunks"
-    __table_args__ = (UniqueConstraint("document_id", "ordinal", name="uq_chunk_doc_ordinal"),)
 
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    document_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    ordinal: Mapped[int] = mapped_column(Integer)
-    content: Mapped[str] = mapped_column(Text)
-    token_estimate: Mapped[int] = mapped_column(Integer, default=0)
-    metadata_json: Mapped[dict] = mapped_column("metadata", JsonType, default=dict)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", GenericJSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    document = relationship("DocumentModel", back_populates="chunks")
+    document: Mapped[DocumentModel] = relationship("DocumentModel", back_populates="chunks", lazy="noload")
 
 
 class KPIModel(Base):
     __tablename__ = "kpis"
 
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    document_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    owner_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
-    name: Mapped[str] = mapped_column(String(255))
-    value: Mapped[str] = mapped_column(String(255))
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    domain: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(512), nullable=False)
+    value: Mapped[str] = mapped_column(String(512), nullable=False)
     unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    period: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    domain: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    evidence_chunk_ids: Mapped[list] = mapped_column(JsonType, default=list)
-    raw: Mapped[dict] = mapped_column(JsonType, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    period: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    evidence_chunk_ids: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
+    raw_extraction: Mapped[dict[str, Any]] = mapped_column(GenericJSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
-    document = relationship("DocumentModel", back_populates="kpis")
+    document: Mapped[DocumentModel] = relationship("DocumentModel", back_populates="kpis", lazy="noload")
 
 
 class ChatSessionModel(Base):
     __tablename__ = "chat_sessions"
 
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    owner_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
-    title: Mapped[str] = mapped_column(String(200))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
-    messages = relationship(
-        "ChatMessageModel", back_populates="session", cascade="all, delete-orphan"
+    owner: Mapped[UserModel] = relationship("UserModel", back_populates="chat_sessions", lazy="noload")
+    messages: Mapped[list[ChatMessageModel]] = relationship(
+        "ChatMessageModel", back_populates="session", lazy="noload"
     )
 
 
 class ChatMessageModel(Base):
     __tablename__ = "chat_messages"
 
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    session_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    role: Mapped[str] = mapped_column(String(32))
-    content: Mapped[str] = mapped_column(Text)
-    citations: Mapped[list] = mapped_column(JsonType, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    citations: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    session = relationship("ChatSessionModel", back_populates="messages")
+    session: Mapped[ChatSessionModel] = relationship("ChatSessionModel", back_populates="messages", lazy="noload")
 
 
 class AuditEventModel(Base):
     __tablename__ = "audit_events"
 
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    action: Mapped[str] = mapped_column(String(64), index=True)
-    actor_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
-    resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    resource_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    details: Mapped[dict] = mapped_column(JsonType, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class DecisionCardModel(Base):
-    __tablename__ = "decision_cards"
-
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    owner_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
-    kpi_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("kpis.id", ondelete="CASCADE"), index=True)
-    document_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    kpi_name: Mapped[str] = mapped_column(String(255))
-    current_value: Mapped[str] = mapped_column(String(255))
-    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    period: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    domain: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    trend: Mapped[str] = mapped_column(String(32))
-    health: Mapped[str] = mapped_column(String(32))
-    what_happened: Mapped[str] = mapped_column(Text)
-    why_it_happened: Mapped[str] = mapped_column(Text)
-    risks: Mapped[list] = mapped_column(JsonType, default=list)
-    opportunities: Mapped[list] = mapped_column(JsonType, default=list)
-    recommendation: Mapped[str] = mapped_column(Text)
-    forecast_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    forecast_horizon: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    forecast_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    evidence_chunk_ids: Mapped[list] = mapped_column(JsonType, default=list)
-    related_kpi_ids: Mapped[list] = mapped_column(JsonType, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class ExecutiveReportModel(Base):
-    __tablename__ = "executive_reports"
-
-    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    owner_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
-    document_id: Mapped[Any | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    summary: Mapped[str] = mapped_column(Text)
-    health_score: Mapped[int] = mapped_column(Integer)
-    health_label: Mapped[str] = mapped_column(String(32))
-    timeline: Mapped[list] = mapped_column(JsonType, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(GenericJSON, nullable=False, default=dict)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

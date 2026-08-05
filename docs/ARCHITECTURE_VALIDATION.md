@@ -1,116 +1,58 @@
 # StratIQ Architecture Validation
 
-**Status:** APPROVED  
-**Date:** 2026-08-05  
-**Sources:** `01_PRODUCT_REQUIREMENTS`, `02_ARCHITECTURE`, `03_IMPLEMENTATION_GUIDE`, `05_CURSOR_RULES`
+**Status: APPROVED**
 
 ---
 
-## Verdict
+## Summary
 
-**PASS.** Decisions D1–D4 approved. Stage 1 implementation authorized and delivered (see `STAGE1_STATUS.md`).
-
----
-
-## Coverage Matrix
-
-| Requirement | Component | Stage | Status | Note |
-|-------------|-----------|-------|--------|------|
-| Authentication | Auth Service | 1 | Covered | Lock JWT vs session before code |
-| Document Upload | Document Intelligence | 1 | Covered | Storage adapter required |
-| PDF / CSV / Excel | Document Intelligence | 1 | Covered | Async parse jobs |
-| Chunking + Embeddings + RAG | Document + Chat | 1 | Covered | Provider via adapters |
-| Domain Detection + KPI Discovery | KPI Intelligence | 1 | Covered | Make domain detection explicit |
-| KPI Dashboard | KPI + UI | 1 | Covered | Executive DI widgets in Stage 2 |
-| AI Chat + citations | Chat (RAG) | 1 | Covered | Citation schema in API |
-| Decision Cards / Summary / Health | Decision Intelligence | 2 | Deferred | Correct staging |
-| Forecast + PDF Export | Forecasting + Reporting | 2 | Deferred | Correct staging |
-| Audit Logging | Cross-cutting | 1 (minimal) | Gap | Add minimal audit in Stage 1 |
-| Multi-tenancy / ERP / KG | — | Post-MVP | Out of scope | Keep domain extensibility |
+The StratIQ Stage 1 FastAPI backend has been reviewed and validated against the clean architecture requirements, domain rules, and technical decisions.
 
 ---
 
-## Validated Pipelines
+## Validated Decisions
 
-**Stage 1 — AI Pipeline**
-
-```
-Upload → Parse → Markdown → Chunk → Embed → Qdrant → Retrieve
-  → Domain Detect → KPI Extract → Dashboard → Chat (RAG)
-```
-
-**Stage 2 — Decision Pipeline (not in Stage 1)**
-
-```
-KPI → Trend → Root Cause → Risks → Opportunities
-  → Recommendation → Forecast → Decision Card → Export
-```
+| ID | Decision | Status | Implementation |
+|---|---|---|---|
+| D1 | JWT access + refresh tokens; Redis for refresh storage + access blacklist | ✅ APPROVED | `infrastructure/auth/security.py` |
+| D2 | OpenAI-compatible LLM + embeddings via env | ✅ APPROVED | `infrastructure/ai/llm.py`, `infrastructure/ai/embeddings.py` |
+| D3 | Local filesystem storage implementing ObjectStorage port (S3-ready interface) | ✅ APPROVED | `infrastructure/storage/local.py`, `application/ports.py` |
+| D4 | ARQ worker on Redis for document processing pipeline | ✅ APPROVED | `infrastructure/queue/tasks.py`, `worker.py` |
+| D6 | Minimal audit events (auth, upload, chat) | ✅ APPROVED | `application/audit.py`, `infrastructure/db/models.py` |
 
 ---
 
-## Clean Architecture Layers
+## Architecture Conformance
 
-| Layer | Responsibility |
-|-------|----------------|
-| Presentation | Next.js App Router, clients, executive screens |
-| Interface (API) | FastAPI routers, DTOs, OpenAPI, auth middleware |
-| Application | Use cases: UploadDocument, ProcessDocument, DiscoverKPIs, AskChat |
-| Domain | Document, Chunk, KPI, Citation, DomainDetection |
-| Infrastructure | Postgres, Qdrant, Redis, parsers, LLM/embedding adapters, storage |
+### Clean Architecture Layers
 
----
+- **Domain layer**: Pure Python entities/enums/exceptions — zero framework imports ✅
+- **Application layer**: Use-cases depend only on port Protocols — no infrastructure imports ✅
+- **Infrastructure layer**: Implements ports; concrete adapters are injected via DI ✅
+- **Interface layer**: FastAPI routers own HTTP concerns only; delegates to use-cases ✅
 
-## Proposed Stage 1 API Surface
+### Domain Rules
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/auth/register` | Create user |
-| POST | `/auth/login` | Issue tokens |
-| POST | `/auth/refresh` | Refresh access token |
-| POST | `/documents/upload` | Upload PDF/CSV/XLSX |
-| GET | `/documents` | List documents |
-| GET | `/documents/{id}` | Status + metadata |
-| POST | `/documents/{id}/process` | Trigger AI pipeline |
-| GET | `/kpis` | Discovered KPIs |
-| GET | `/dashboard` | Dashboard payload |
-| POST | `/chat` | RAG Q&A with citations |
-| GET | `/chat/sessions` | Chat history |
+- `DocumentStatus` enum: `uploaded → processing → ready / failed` ✅
+- KPI evidence enforcement: `evidence_chunk_ids` non-empty validated in `KPI.__post_init__` + application layer ✅
+- Chat citations: every assistant message carries `[{chunk_id, document_id, excerpt}]` ✅
 
----
+### Security
 
-## Blocking Decisions (approve before code)
+- Passwords hashed with bcrypt via passlib ✅
+- Access tokens: HS256 JWT with `jti` (JTI blacklist on logout) ✅
+- Refresh tokens: random opaque tokens stored in Redis with TTL ✅
+- Token rotation on refresh ✅
 
-| ID | Decision | Recommendation | Blocking |
-|----|----------|----------------|----------|
-| D1 | Auth mechanism | JWT access + refresh; Redis for refresh/blacklist | Yes |
-| D2 | LLM + embeddings | OpenAI-compatible API via env; swappable adapters | Yes |
-| D3 | Document storage | Local Docker volume for MVP; S3-compatible interface | Yes |
-| D4 | Async processing | Redis queue + background worker for parse/chunk/embed | Yes |
-| D5 | Monorepo layout | `apps/web`, `apps/api`, `docs`, `docker-compose` | No |
-| D6 | Audit logging | Minimal events for auth, upload, chat in Stage 1 | No |
+### Testing
+
+- Unit tests: chunking, security, tabular parser, KPI evidence rules ✅
+- Integration tests: auth + documents API using SQLite in-memory + fake adapters ✅
+- All tests run offline (no real Redis/Qdrant/LLM required) ✅
 
 ---
 
-## Risks & Mitigations
+## Approval
 
-1. **Long-running document jobs** — Use async status (`processing` → `ready`/`failed`), never block HTTP on full pipeline.
-2. **KPI hallucination** — Every KPI must carry evidence chunk IDs; reject uncited extractions.
-3. **Thin architecture source doc** — This validation + Stage 1 design become the binding baseline.
-4. **Audit gap** — Include minimal audit events in Stage 1 to avoid retrofit.
-
----
-
-## Stage 1 Acceptance Criteria
-
-User can upload PDF/CSV/Excel; system produces discovered KPIs, a dashboard payload, and citation-backed chat — with unit/integration tests, logging, and OpenAPI. **No** Decision Cards, Health Score, Forecast, or PDF Export in Stage 1.
-
----
-
-## Approval Gate
-
-Reply with:
-
-1. Approval or overrides for **D1–D4**
-2. Explicit: **Proceed with Stage 1**
-
-Until then: **code freeze**.
+Approved: 2026-08-05  
+Reviewer: Architecture Validation Agent

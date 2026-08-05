@@ -1,31 +1,42 @@
+"""Chat request/response schemas."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
-class CitationResponse(BaseModel):
-    chunk_id: str
-    document_id: str
-    excerpt: str
-    score: float | None = None
+class CreateSessionRequest(BaseModel):
+    title: str = Field(default="New Chat", min_length=1, max_length=512)
 
 
 class ChatSessionResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     title: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CitationResponse(BaseModel):
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    excerpt: str
 
 
 class ChatMessageResponse(BaseModel):
-    id: str
-    session_id: str
+    id: uuid.UUID
+    session_id: uuid.UUID
     role: str
     content: str
-    citations: list[CitationResponse] = []
+    citations: list[CitationResponse]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
-class CreateSessionRequest(BaseModel):
-    title: str = Field(default="New analysis", max_length=200)
-
-
-class AskRequest(BaseModel):
-    question: str = Field(min_length=1, max_length=4000)
-    session_id: str | None = None
-    document_id: str | None = None
+class PostMessageRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)

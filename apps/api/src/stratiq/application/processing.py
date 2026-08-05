@@ -1,208 +1,183 @@
+"""Document processing pipeline use-case (called from ARQ worker)."""
+
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID, uuid4
 
-from stratiq.application.ports import (
-    AuditRepository,
-    ChunkRepository,
-    DecisionRepository,
-    DocumentParser,
-    DocumentRepository,
-    EmbeddingsPort,
-    KPIRepository,
-    LLMPort,
-    ObjectStorage,
-    VectorStore,
-)
-from stratiq.application.decisions import DecisionIntelligenceService
-from stratiq.domain.entities import Chunk, KPI
-from stratiq.domain.enums import AuditAction, DocumentStatus
-from stratiq.domain.exceptions import NotFoundError, ProcessingError, ValidationError
-from stratiq.infrastructure.ai import prompts
-from stratiq.infrastructure.chunking.semantic import chunk_markdown
-from stratiq.infrastructure.parsers.factory import get_parser
+from stratiq.application.ports import EmbeddingClient, LLMClient, ObjectStorage, VectorStore
+from stratiq.domain.enums import DocumentStatus, KPIDomain
+from stratiq.domain.exceptions import EvidenceRequiredError, ProcessingError
 
 logger = logging.getLogger(__name__)
 
+_DOMAIN_DETECT_PROMPT = """You are a domain classifier. Given the following document text (first 2000 chars), 
+identify which strategic domains are present. Return a JSON object with key "domains" containing a list of 
+domain strings from: financial, operational, strategic, risk, hr, marketing, technology, other.
+Example: {"domains": ["financial", "operational"]}
+Document text:
+{text}"""
 
-def validate_kpi_payload(raw: dict[str, Any], known_chunk_ids: set[str]) -> None:
-    name = (raw.get("name") or "").strip()
-    value = str(raw.get("value", "")).strip()
-    evidence = raw.get("evidence_chunk_ids") or []
-    if not name or not value:
-        raise ValidationError("KPI requires name and value")
-    if not isinstance(evidence, list) or not evidence:
-        raise ValidationError(f"KPI '{name}' missing evidence_chunk_ids")
-    evidence_ids = [str(e) for e in evidence]
-    if not any(eid in known_chunk_ids for eid in evidence_ids):
-        raise ValidationError(f"KPI '{name}' evidence does not match document chunks")
+_KPI_EXTRACT_PROMPT = """You are a KPI extraction specialist. Given the following document chunks, 
+extract all measurable KPIs. For each KPI return:
+- name: descriptive KPI name
+- value: numeric or textual value  
+- unit: unit of measurement (optional)
+- period: time period (optional)
+- domain: one of financial/operational/strategic/risk/hr/marketing/technology/other
+- evidence_chunk_ids: list of chunk IDs (strings) that contain evidence for this KPI
+
+Return JSON: {"kpis": [{"name": ..., "value": ..., "unit": ..., "period": ..., "domain": ..., "evidence_chunk_ids": [...]}]}
+
+Chunks (id: content):
+{chunks}"""
 
 
-class DocumentProcessingService:
+class ProcessingService:
     def __init__(
         self,
-        documents: DocumentRepository,
-        chunks: ChunkRepository,
-        kpis: KPIRepository,
+        document_repo: "DocumentRepository",  # noqa: F821
+        chunk_repo: "ChunkRepository",  # noqa: F821
+        kpi_repo: "KPIRepository",  # noqa: F821
         storage: ObjectStorage,
-        embeddings: EmbeddingsPort,
-        llm: LLMPort,
-        vectors: VectorStore,
-        audit: AuditRepository,
-        embedding_dimensions: int,
-        decisions: DecisionRepository | None = None,
+        parser_factory: "ParserFactory",  # noqa: F821
+        chunker: "SemanticChunker",  # noqa: F821
+        embedding_client: EmbeddingClient,
+        vector_store: VectorStore,
+        llm_client: LLMClient,
+        qdrant_collection: str,
+        audit_service: "AuditService",  # noqa: F821
     ) -> None:
-        self._documents = documents
-        self._chunks = chunks
-        self._kpis = kpis
+        self._docs = document_repo
+        self._chunks = chunk_repo
+        self._kpis = kpi_repo
         self._storage = storage
-        self._embeddings = embeddings
-        self._llm = llm
-        self._vectors = vectors
-        self._audit = audit
-        self._embedding_dimensions = embedding_dimensions
-        self._decisions = decisions
+        self._parser_factory = parser_factory
+        self._chunker = chunker
+        self._embeddings = embedding_client
+        self._vectors = vector_store
+        self._llm = llm_client
+        self._collection = qdrant_collection
+        self._audit = audit_service
 
-    async def process(self, document_id: UUID) -> None:
-        document = await self._documents.get_by_id(document_id)
-        if not document:
-            raise NotFoundError(f"Document {document_id} not found")
+    async def process_document(self, document_id: uuid.UUID) -> None:
+        from stratiq.domain.entities import Chunk, KPI
+
+        logger.info("Processing document", extra={"doc_id": str(document_id)})
+        doc = await self._docs.get_by_id(document_id)
+        if doc is None:
+            raise ProcessingError(f"Document {document_id} not found.")
 
         try:
-            data = await self._storage.get(document.storage_key)
-            parser: DocumentParser = get_parser(document.filename, document.content_type)
-            markdown = parser.parse(data, document.filename)
-            if not markdown.strip():
-                raise ProcessingError("Parser produced empty content")
+            raw_bytes = await self._storage.load(doc.storage_path)
+            parser = self._parser_factory.get_parser(doc.mime_type, doc.original_filename)
+            markdown_text = parser.parse(raw_bytes)
 
-            text_chunks = chunk_markdown(markdown)
-            if not text_chunks:
-                raise ProcessingError("No chunks produced from document")
+            raw_chunks = self._chunker.chunk(markdown_text)
 
+            now = datetime.now(UTC)
             chunk_entities: list[Chunk] = []
-            for ordinal, text in enumerate(text_chunks):
-                chunk_entities.append(
-                    Chunk(
-                        id=uuid4(),
-                        document_id=document.id,
-                        ordinal=ordinal,
-                        content=text,
-                        token_estimate=max(1, len(text.split())),
-                        metadata={"filename": document.filename},
-                    )
+            for idx, raw_chunk in enumerate(raw_chunks):
+                chunk = Chunk(
+                    id=uuid.uuid4(),
+                    document_id=document_id,
+                    content=raw_chunk["content"],
+                    chunk_index=idx,
+                    page_number=raw_chunk.get("page_number"),
+                    metadata=raw_chunk.get("metadata", {}),
+                    created_at=now,
                 )
-            saved_chunks = await self._chunks.replace_for_document(document.id, chunk_entities)
-            vectors = await self._embeddings.embed([c.content for c in saved_chunks])
-            await self._vectors.ensure_collection(self._embedding_dimensions)
-            await self._vectors.delete_document(str(document.id))
-            points = []
-            for chunk, vector in zip(saved_chunks, vectors, strict=True):
-                points.append(
-                    {
-                        "id": str(chunk.id),
-                        "vector": vector,
-                        "payload": {
-                            "chunk_id": str(chunk.id),
-                            "document_id": str(document.id),
-                            "owner_id": str(document.owner_id),
-                            "ordinal": chunk.ordinal,
-                            "content": chunk.content,
-                            "filename": document.filename,
-                        },
-                    }
-                )
-            await self._vectors.upsert_chunks(points)
+                chunk_entities.append(chunk)
 
-            known_ids = {str(c.id) for c in saved_chunks}
-            sample = "\n\n".join(
-                f"[chunk:{c.id}]\n{c.content}" for c in saved_chunks[:12]
-            )
-            domain_raw = await self._llm.complete_json(
-                prompts.DOMAIN_DETECTION_SYSTEM,
-                prompts.domain_detection_user(sample),
-            )
-            domain = str(domain_raw.get("industry") or domain_raw.get("domain") or "General")
-            confidence = float(domain_raw.get("confidence") or 0.0)
+            await self._chunks.save_many(chunk_entities)
 
-            kpi_raw = await self._llm.complete_json(
-                prompts.KPI_DISCOVERY_SYSTEM,
-                prompts.kpi_discovery_user(domain, sample),
+            texts = [c.content for c in chunk_entities]
+            vectors = await self._embeddings.embed(texts)
+
+            qdrant_points = [
+                {
+                    "id": str(chunk.id),
+                    "vector": vec,
+                    "payload": {
+                        "document_id": str(document_id),
+                        "owner_id": str(doc.owner_id),
+                        "chunk_index": chunk.chunk_index,
+                        "content": chunk.content,
+                        "page_number": chunk.page_number,
+                    },
+                }
+                for chunk, vec in zip(chunk_entities, vectors)
+            ]
+            await self._vectors.upsert(self._collection, qdrant_points)
+
+            # Domain detection
+            preview_text = markdown_text[:2000]
+            domain_result = await self._llm.json_completion(
+                messages=[
+                    {"role": "user", "content": _DOMAIN_DETECT_PROMPT.format(text=preview_text)}
+                ],
+                temperature=0.0,
+                max_tokens=256,
             )
-            items = kpi_raw.get("kpis") if isinstance(kpi_raw, dict) else None
-            if not isinstance(items, list):
-                raise ProcessingError("KPI discovery returned invalid payload")
+            detected_domains: list[str] = domain_result.get("domains", ["other"])
+
+            # KPI extraction
+            chunks_text = "\n".join(f"{c.id}: {c.content[:300]}" for c in chunk_entities[:40])
+            kpi_result = await self._llm.json_completion(
+                messages=[
+                    {"role": "user", "content": _KPI_EXTRACT_PROMPT.format(chunks=chunks_text)}
+                ],
+                temperature=0.0,
+                max_tokens=2048,
+            )
 
             kpi_entities: list[KPI] = []
-            for item in items:
-                if not isinstance(item, dict):
+            for raw_kpi in kpi_result.get("kpis", []):
+                evidence_ids = [uuid.UUID(cid) for cid in raw_kpi.get("evidence_chunk_ids", []) if cid]
+                if not evidence_ids:
+                    logger.warning("Skipping KPI with no evidence", extra={"kpi_name": raw_kpi.get("name")})
                     continue
-                try:
-                    validate_kpi_payload(item, known_ids)
-                except ValidationError as exc:
-                    logger.warning("skipping_invalid_kpi reason=%s", exc)
-                    continue
-                evidence = [str(e) for e in item["evidence_chunk_ids"] if str(e) in known_ids]
-                if not evidence:
-                    continue
-                kpi_entities.append(
-                    KPI(
-                        id=uuid4(),
-                        document_id=document.id,
-                        owner_id=document.owner_id,
-                        name=str(item["name"]).strip(),
-                        value=str(item["value"]).strip(),
-                        unit=(str(item["unit"]).strip() if item.get("unit") else None),
-                        period=(str(item["period"]).strip() if item.get("period") else None),
-                        evidence_chunk_ids=evidence,
-                        domain=domain,
-                        raw=item,
-                    )
-                )
 
-            await self._kpis.replace_for_document(document.id, kpi_entities)
-            document.status = DocumentStatus.READY
-            document.domain = domain
-            document.domain_confidence = confidence
-            document.error_message = None
-            await self._documents.update(document)
-            await self._audit.record(
-                AuditAction.DOCUMENT_PROCESS_COMPLETED,
-                document.owner_id,
-                "document",
-                str(document.id),
-                {"kpi_count": len(kpi_entities), "chunk_count": len(saved_chunks)},
-            )
-            if self._decisions is not None and kpi_entities:
                 try:
-                    di = DecisionIntelligenceService(
-                        kpis=self._kpis,
-                        documents=self._documents,
-                        chunks=self._chunks,
-                        decisions=self._decisions,
-                        llm=self._llm,
-                        audit=self._audit,
+                    kpi = KPI(
+                        id=uuid.uuid4(),
+                        document_id=document_id,
+                        owner_id=doc.owner_id,
+                        domain=KPIDomain(raw_kpi.get("domain", "other")),
+                        name=raw_kpi.get("name", "Unknown"),
+                        value=str(raw_kpi.get("value", "")),
+                        unit=raw_kpi.get("unit"),
+                        period=raw_kpi.get("period"),
+                        evidence_chunk_ids=evidence_ids,
+                        raw_extraction=raw_kpi,
+                        created_at=now,
+                        updated_at=now,
                     )
-                    await di.generate(document.owner_id, document.id)
-                except Exception:
-                    logger.exception("decision_intelligence_failed document_id=%s", document.id)
+                    kpi_entities.append(kpi)
+                except (ValueError, EvidenceRequiredError) as exc:
+                    logger.warning("KPI validation failed: %s", exc)
+                    continue
+
+            if kpi_entities:
+                await self._kpis.save_many(kpi_entities)
+
+            await self._docs.update_status(document_id, DocumentStatus.ready)
+            await self._audit.log_document_processed(doc.owner_id, document_id, len(kpi_entities))
             logger.info(
-                "document_processed id=%s kpis=%s chunks=%s",
-                document.id,
-                len(kpi_entities),
-                len(saved_chunks),
+                "Document processed successfully",
+                extra={"doc_id": str(document_id), "chunks": len(chunk_entities), "kpis": len(kpi_entities)},
             )
+
         except Exception as exc:
-            logger.exception("document_process_failed id=%s", document_id)
-            document.status = DocumentStatus.FAILED
-            document.error_message = str(exc)[:2000]
-            await self._documents.update(document)
-            await self._audit.record(
-                AuditAction.DOCUMENT_PROCESS_FAILED,
-                document.owner_id,
-                "document",
-                str(document.id),
-                {"error": str(exc)[:500]},
-            )
+            logger.exception("Document processing failed", extra={"doc_id": str(document_id)})
+            await self._docs.update_status(document_id, DocumentStatus.failed, error_message=str(exc))
+            await self._audit.log_document_failed(doc.owner_id, document_id, str(exc))
             raise ProcessingError(str(exc)) from exc
+
+    def _domain_for(self, raw: str) -> "KPIDomain":
+        try:
+            return KPIDomain(raw)
+        except ValueError:
+            return KPIDomain.other

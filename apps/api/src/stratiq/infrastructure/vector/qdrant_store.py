@@ -1,92 +1,93 @@
+"""Qdrant vector store adapter implementing the VectorStore port."""
+
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
-from uuid import UUID
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.http import models as qmodels
+from qdrant_client.http.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
+
+from stratiq.domain.exceptions import ProcessingError
 
 logger = logging.getLogger(__name__)
 
 
 class QdrantVectorStore:
-    def __init__(self, url: str, collection: str) -> None:
+    def __init__(self, url: str, collection: str, vector_size: int = 1536) -> None:
         self._client = AsyncQdrantClient(url=url)
-        self._collection = collection
+        self._default_collection = collection
+        self._vector_size = vector_size
 
-    async def ensure_collection(self, vector_size: int) -> None:
-        exists = await self._client.collection_exists(self._collection)
-        if exists:
-            return
-        await self._client.create_collection(
-            collection_name=self._collection,
-            vectors_config=qmodels.VectorParams(size=vector_size, distance=qmodels.Distance.COSINE),
-        )
-        logger.info("qdrant_collection_created name=%s size=%s", self._collection, vector_size)
-
-    async def upsert_chunks(self, points: list[dict[str, Any]]) -> None:
-        if not points:
-            return
-        await self._client.upsert(
-            collection_name=self._collection,
-            points=[
-                qmodels.PointStruct(
-                    id=_point_id(point["id"]),
-                    vector=point["vector"],
-                    payload=point["payload"],
+    async def ensure_collection(self, collection: str | None = None) -> None:
+        name = collection or self._default_collection
+        try:
+            existing = await self._client.get_collections()
+            names = {c.name for c in existing.collections}
+            if name not in names:
+                await self._client.create_collection(
+                    collection_name=name,
+                    vectors_config=VectorParams(size=self._vector_size, distance=Distance.COSINE),
                 )
-                for point in points
-            ],
-        )
+                logger.info("Qdrant collection created", extra={"collection": name})
+        except Exception as exc:
+            raise ProcessingError(f"Qdrant ensure_collection failed: {exc}") from exc
+
+    async def upsert(self, collection: str, points: list[dict[str, Any]]) -> None:
+        try:
+            qdrant_points = [
+                PointStruct(
+                    id=p["id"],
+                    vector=p["vector"],
+                    payload=p.get("payload", {}),
+                )
+                for p in points
+            ]
+            await self._client.upsert(collection_name=collection, points=qdrant_points, wait=True)
+            logger.debug("Qdrant upserted", extra={"collection": collection, "count": len(points)})
+        except Exception as exc:
+            raise ProcessingError(f"Qdrant upsert failed: {exc}") from exc
 
     async def search(
         self,
-        vector: list[float],
-        owner_id: str,
+        collection: str,
+        query_vector: list[float],
         top_k: int,
-        document_id: str | None = None,
+        filter_payload: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        must = [qmodels.FieldCondition(key="owner_id", match=qmodels.MatchValue(value=owner_id))]
-        if document_id:
-            must.append(
-                qmodels.FieldCondition(
-                    key="document_id", match=qmodels.MatchValue(value=document_id)
-                )
+        try:
+            qdrant_filter: Filter | None = None
+            if filter_payload:
+                conditions = [
+                    FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filter_payload.items()
+                ]
+                qdrant_filter = Filter(must=conditions)
+
+            results = await self._client.search(
+                collection_name=collection,
+                query_vector=query_vector,
+                limit=top_k,
+                query_filter=qdrant_filter,
+                with_payload=True,
             )
-        results = await self._client.search(
-            collection_name=self._collection,
-            query_vector=vector,
-            limit=top_k,
-            query_filter=qmodels.Filter(must=must),
-            with_payload=True,
-        )
-        return [
-            {"id": str(hit.id), "score": hit.score, "payload": hit.payload or {}}
-            for hit in results
-        ]
+            return [
+                {"id": str(hit.id), "score": hit.score, "payload": hit.payload or {}}
+                for hit in results
+            ]
+        except Exception as exc:
+            raise ProcessingError(f"Qdrant search failed: {exc}") from exc
 
-    async def delete_document(self, document_id: str) -> None:
-        exists = await self._client.collection_exists(self._collection)
-        if not exists:
-            return
-        await self._client.delete(
-            collection_name=self._collection,
-            points_selector=qmodels.FilterSelector(
-                filter=qmodels.Filter(
-                    must=[
-                        qmodels.FieldCondition(
-                            key="document_id", match=qmodels.MatchValue(value=document_id)
-                        )
-                    ]
-                )
-            ),
-        )
+    async def delete_by_document(self, collection: str, document_id: uuid.UUID) -> None:
+        try:
+            from qdrant_client.http.models import FilterSelector
 
-
-def _point_id(value: str) -> str:
-    # Qdrant accepts UUID strings or unsigned ints; keep UUID string form.
-    try:
-        return str(UUID(value))
-    except ValueError:
-        return value
+            qdrant_filter = Filter(
+                must=[FieldCondition(key="document_id", match=MatchValue(value=str(document_id)))]
+            )
+            await self._client.delete(
+                collection_name=collection,
+                points_selector=FilterSelector(filter=qdrant_filter),
+            )
+        except Exception as exc:
+            raise ProcessingError(f"Qdrant delete_by_document failed: {exc}") from exc
