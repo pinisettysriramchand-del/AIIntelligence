@@ -21,6 +21,25 @@ class KPIDomain(str, Enum):
     other = "other"
 
 
+class HealthLabel(str, Enum):
+    critical = "critical"
+    watch = "watch"
+    healthy = "healthy"
+
+
+class TrendDirection(str, Enum):
+    up = "up"
+    down = "down"
+    flat = "flat"
+    unknown = "unknown"
+
+
+class EvidenceMode(str, Enum):
+    evidence = "evidence"
+    inference = "inference"
+    insufficient = "insufficient"
+
+
 class AuditEventType(str, Enum):
     user_registered = "user_registered"
     user_login = "user_login"
@@ -31,3 +50,5 @@ class AuditEventType(str, Enum):
     document_failed = "document_failed"
     chat_message_sent = "chat_message_sent"
     chat_session_created = "chat_session_created"
+    decisions_generated = "decisions_generated"
+    report_exported = "report_exported"

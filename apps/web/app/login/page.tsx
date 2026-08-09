@@ -20,7 +20,7 @@ export default function LoginPage() {
     try {
       if (mode === "register") {
         await api(
-          "/api/auth/register",
+          "/api/v1/auth/register",
           {
             method: "POST",
             body: JSON.stringify({ email, password, full_name: fullName }),
@@ -29,7 +29,7 @@ export default function LoginPage() {
         );
       }
       const tokens = await api<Tokens>(
-        "/api/auth/login",
+        "/api/v1/auth/login",
         {
           method: "POST",
           body: JSON.stringify({ email, password }),

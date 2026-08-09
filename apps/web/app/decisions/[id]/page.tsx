@@ -16,12 +16,15 @@ type DecisionCard = {
   health: string;
   what_happened: string;
   why_it_happened: string;
+  business_impact: string;
   risks: string[];
   opportunities: string[];
   recommendation: string;
   forecast_value?: string | null;
   forecast_horizon?: string | null;
   forecast_explanation?: string | null;
+  confidence: number;
+  evidence_mode: string;
   evidence_chunk_ids: string[];
 };
 
@@ -30,21 +33,26 @@ export default function DecisionCardPage() {
   const router = useRouter();
   const [card, setCard] = useState<DecisionCard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!getTokens()) {
       router.replace("/login");
       return;
     }
-    api<DecisionCard>(`/api/decisions/cards/${params.id}`)
+    setLoading(true);
+    api<DecisionCard>(`/api/v1/decisions/cards/${params.id}`)
       .then(setCard)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
+      .finally(() => setLoading(false));
   }, [params.id, router]);
 
   return (
     <main>
       <AppNav />
+      {loading && <p className="muted">Loading decision card…</p>}
       {error && <p className="error">{error}</p>}
+      {!loading && !error && !card && <p className="muted">Decision card not found.</p>}
       {card && (
         <>
           <h1 className="hero-title">{card.kpi_name}</h1>
@@ -52,6 +60,9 @@ export default function DecisionCardPage() {
             {card.current_value}
             {card.unit ? ` ${card.unit}` : ""} · {card.period || "n/a"} · {card.domain || "General"}
           </p>
+          {card.evidence_mode === "insufficient" && (
+            <p className="error">Insufficient evidence for a fully grounded recommendation.</p>
+          )}
           <section className="grid" style={{ marginTop: 20 }}>
             <div className="stat">
               <span className="muted">Trend</span>
@@ -61,12 +72,22 @@ export default function DecisionCardPage() {
               <span className="muted">Health</span>
               <strong>{card.health}</strong>
             </div>
+            <div className="stat">
+              <span className="muted">Confidence</span>
+              <strong>{(card.confidence * 100).toFixed(0)}%</strong>
+            </div>
+            <div className="stat">
+              <span className="muted">Evidence mode</span>
+              <strong>{card.evidence_mode}</strong>
+            </div>
           </section>
           <section className="panel">
             <h2>What happened</h2>
             <p>{card.what_happened}</p>
             <h2>Why it happened</h2>
             <p>{card.why_it_happened}</p>
+            <h2>Business impact</h2>
+            <p>{card.business_impact}</p>
             <h2>Risks</h2>
             <ul>
               {card.risks.map((risk) => (

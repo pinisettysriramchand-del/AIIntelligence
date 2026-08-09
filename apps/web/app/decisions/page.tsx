@@ -27,7 +27,7 @@ export default function DecisionsPage() {
       router.replace("/login");
       return;
     }
-    api<DecisionCard[]>("/api/decisions/cards")
+    api<DecisionCard[]>("/api/v1/decisions/cards")
       .then(setCards)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [router]);

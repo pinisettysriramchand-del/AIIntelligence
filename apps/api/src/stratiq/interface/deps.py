@@ -12,8 +12,10 @@ from stratiq.application.audit import AuditService
 from stratiq.application.auth import AuthService
 from stratiq.application.chat import ChatService
 from stratiq.application.dashboard import DashboardService
+from stratiq.application.decisions import DecisionIntelligenceService
 from stratiq.application.documents import DocumentService
 from stratiq.application.kpis import KPIService
+from stratiq.application.reports import ReportService
 from stratiq.config import Settings, get_settings
 from stratiq.domain.entities import User
 from stratiq.domain.exceptions import (
@@ -35,6 +37,7 @@ from stratiq.infrastructure.db.repositories import (
     ChatMessageRepository,
     ChatSessionRepository,
     ChunkRepository,
+    DecisionRepository,
     DocumentRepository,
     KPIRepository,
     UserRepository,
@@ -103,6 +106,10 @@ def get_message_repo(session=Depends(get_db_session)) -> ChatMessageRepository:
 
 def get_audit_repo(session=Depends(get_db_session)) -> AuditRepository:
     return AuditRepository(session)
+
+
+def get_decision_repo(session=Depends(get_db_session)) -> DecisionRepository:
+    return DecisionRepository(session)
 
 
 # ── Infrastructure singletons ─────────────────────────────────────────────────
@@ -201,6 +208,31 @@ def get_chat_service(
         qdrant_collection=settings.qdrant_collection,
         audit_service=audit,
     )
+
+
+def get_decision_service(
+    kpi_repo: KPIRepository = Depends(get_kpi_repo),
+    doc_repo: DocumentRepository = Depends(get_doc_repo),
+    chunk_repo: ChunkRepository = Depends(get_chunk_repo),
+    decision_repo: DecisionRepository = Depends(get_decision_repo),
+    llm: OpenAILLMClient = Depends(get_llm),
+    audit: AuditService = Depends(get_audit_service),
+) -> DecisionIntelligenceService:
+    return DecisionIntelligenceService(
+        kpi_repo=kpi_repo,
+        doc_repo=doc_repo,
+        chunk_repo=chunk_repo,
+        decision_repo=decision_repo,
+        llm=llm,
+        audit=audit,
+    )
+
+
+def get_report_service(
+    decision_repo: DecisionRepository = Depends(get_decision_repo),
+    audit: AuditService = Depends(get_audit_service),
+) -> ReportService:
+    return ReportService(decision_repo=decision_repo, audit=audit)
 
 
 # ── Current user ──────────────────────────────────────────────────────────────

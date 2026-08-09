@@ -52,7 +52,7 @@ export default function DashboardPage() {
   const [generating, setGenerating] = useState(false);
 
   async function load() {
-    const dashboard = await api<Dashboard>("/api/dashboard");
+    const dashboard = await api<Dashboard>("/api/v1/dashboard");
     setData(dashboard);
   }
 
@@ -68,7 +68,7 @@ export default function DashboardPage() {
     setGenerating(true);
     setError(null);
     try {
-      await api("/api/decisions/generate", { method: "POST", body: JSON.stringify({}) });
+      await api("/api/v1/decisions/generate", { method: "POST", body: JSON.stringify({}) });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");

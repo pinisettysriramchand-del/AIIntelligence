@@ -37,8 +37,8 @@ export default function ReportsPage() {
       return;
     }
     Promise.all([
-      api<Executive>("/api/decisions/executive"),
-      api<Forecast[]>("/api/forecasts"),
+      api<Executive>("/api/v1/decisions/executive"),
+      api<Forecast[]>("/api/v1/forecasts"),
     ])
       .then(([executive, forecastItems]) => {
         setReport(executive);
@@ -50,7 +50,7 @@ export default function ReportsPage() {
   async function downloadPdf() {
     const tokens = getTokens();
     if (!tokens) return;
-    const response = await fetch(`${API_URL}/api/reports/executive.pdf`, {
+    const response = await fetch(`${API_URL}/api/v1/reports/executive.pdf`, {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
     if (!response.ok) {

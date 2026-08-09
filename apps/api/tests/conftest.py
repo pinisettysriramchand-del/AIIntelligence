@@ -243,7 +243,7 @@ async def app(test_settings: Settings, db_engine, fake_redis: FakeRedis) -> Fast
     from fastapi import FastAPI as _FastAPI
     from fastapi.middleware.cors import CORSMiddleware
     from stratiq.interface.app_factory import _register_exception_handlers
-    from stratiq.interface.routers import auth, chat, dashboard, documents, kpis
+    from stratiq.interface.routers import auth, chat, dashboard, decisions, documents, kpis, reports
 
     _app = _FastAPI(title="StratIQ Test", lifespan=_noop_lifespan)
     _app.add_middleware(
@@ -259,6 +259,8 @@ async def app(test_settings: Settings, db_engine, fake_redis: FakeRedis) -> Fast
     _app.include_router(kpis.router, prefix="/api/v1")
     _app.include_router(dashboard.router, prefix="/api/v1")
     _app.include_router(chat.router, prefix="/api/v1")
+    _app.include_router(decisions.router, prefix="/api/v1")
+    _app.include_router(reports.router, prefix="/api/v1")
 
     @_app.get("/health")
     async def health() -> dict:
@@ -298,3 +300,16 @@ async def auth_client(client: AsyncClient) -> AsyncGenerator[tuple[AsyncClient, 
     token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     yield client, headers
+
+
+@pytest_asyncio.fixture
+async def auth_headers(auth_client) -> dict[str, str]:
+    _, headers = auth_client
+    return headers
+
+
+@pytest_asyncio.fixture
+async def current_user_id(client: AsyncClient, auth_headers: dict[str, str]) -> uuid.UUID:
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert me.status_code == 200
+    return uuid.UUID(me.json()["id"])

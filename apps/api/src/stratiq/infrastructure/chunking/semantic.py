@@ -52,7 +52,10 @@ class SemanticChunker:
         if current_parts:
             chunks.append({"content": "\n\n".join(current_parts), "metadata": {}})
 
-        return chunks if chunks else [{"content": text[:self._size], "metadata": {}}]
+        if chunks:
+            return chunks
+        joined = "\n\n".join(segments).strip()
+        return [{"content": joined[: self._size] if joined else "", "metadata": {}}]
 
     def _build_overlap(self, parts: list[str]) -> list[str]:
         overlap: list[str] = []

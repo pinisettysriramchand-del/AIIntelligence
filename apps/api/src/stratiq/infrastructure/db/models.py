@@ -153,3 +153,57 @@ class AuditEventModel(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(GenericJSON, nullable=False, default=dict)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DecisionCardModel(Base):
+    __tablename__ = "decision_cards"
+
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kpi_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("kpis.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kpi_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    current_value: Mapped[str] = mapped_column(String(512), nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    period: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    trend: Mapped[str] = mapped_column(String(32), nullable=False)
+    health: Mapped[str] = mapped_column(String(32), nullable=False)
+    what_happened: Mapped[str] = mapped_column(Text, nullable=False)
+    why_it_happened: Mapped[str] = mapped_column(Text, nullable=False)
+    business_impact: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    risks: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
+    opportunities: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
+    recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    forecast_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    forecast_horizon: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    forecast_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[str] = mapped_column(String(32), nullable=False, default="0.5")
+    evidence_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="evidence")
+    evidence_chunk_ids: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
+    related_kpi_ids: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ExecutiveReportModel(Base):
+    __tablename__ = "executive_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(GenericUuid(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        GenericUuid(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    health_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    health_label: Mapped[str] = mapped_column(String(32), nullable=False)
+    timeline: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
+    confidence: Mapped[str] = mapped_column(String(32), nullable=False, default="0.5")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

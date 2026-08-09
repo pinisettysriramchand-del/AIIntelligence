@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from stratiq.domain.enums import AuditEventType, DocumentStatus, KPIDomain
+from stratiq.domain.enums import AuditEventType, DocumentStatus, EvidenceMode, HealthLabel, KPIDomain, TrendDirection
 
 
 @dataclass
@@ -101,3 +101,45 @@ class AuditEvent:
     payload: dict[str, Any]
     ip_address: str | None
     created_at: datetime
+
+
+@dataclass
+class DecisionCard:
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    kpi_id: uuid.UUID
+    document_id: uuid.UUID
+    kpi_name: str
+    current_value: str
+    unit: str | None
+    period: str | None
+    domain: str | None
+    trend: TrendDirection
+    health: HealthLabel
+    what_happened: str
+    why_it_happened: str
+    business_impact: str
+    risks: list[str]
+    opportunities: list[str]
+    recommendation: str
+    forecast_value: str | None
+    forecast_horizon: str | None
+    forecast_explanation: str | None
+    confidence: float
+    evidence_mode: EvidenceMode
+    evidence_chunk_ids: list[uuid.UUID]
+    related_kpi_ids: list[uuid.UUID] = field(default_factory=list)
+    created_at: datetime | None = None
+
+
+@dataclass
+class ExecutiveReport:
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    summary: str
+    health_score: int
+    health_label: HealthLabel
+    timeline: list[dict[str, Any]]
+    document_id: uuid.UUID | None = None
+    confidence: float = 0.0
+    created_at: datetime | None = None

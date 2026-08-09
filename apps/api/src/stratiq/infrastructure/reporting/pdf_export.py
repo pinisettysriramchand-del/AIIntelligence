@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from io import BytesIO
-
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from io import BytesIO
 
 from stratiq.domain.entities import DecisionCard, ExecutiveReport
 
@@ -18,7 +17,8 @@ def build_executive_pdf(report: ExecutiveReport, cards: list[DecisionCard]) -> b
         Paragraph("StratIQ Executive Report", styles["Title"]),
         Spacer(1, 0.2 * inch),
         Paragraph(
-            f"Business Health: {report.health_label.upper()} ({report.health_score}/100)",
+            f"Business Health: {report.health_label.value.upper()} ({report.health_score}/100) "
+            f"· confidence {report.confidence:.2f}",
             styles["Heading2"],
         ),
         Spacer(1, 0.1 * inch),
@@ -41,21 +41,22 @@ def build_executive_pdf(report: ExecutiveReport, cards: list[DecisionCard]) -> b
     story.append(Paragraph("Decision Cards", styles["Heading2"]))
     for card in cards:
         story.append(Paragraph(f"{card.kpi_name}: {card.current_value}", styles["Heading3"]))
+        story.append(
+            Paragraph(
+                f"<b>Mode:</b> {card.evidence_mode.value} · <b>Confidence:</b> {card.confidence:.2f}",
+                styles["BodyText"],
+            )
+        )
         story.append(Paragraph(f"<b>What happened:</b> {card.what_happened}", styles["BodyText"]))
         story.append(Paragraph(f"<b>Why:</b> {card.why_it_happened}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Business impact:</b> {card.business_impact}", styles["BodyText"]))
         if card.risks:
-            story.append(
-                Paragraph("<b>Risks:</b> " + "; ".join(card.risks), styles["BodyText"])
-            )
+            story.append(Paragraph("<b>Risks:</b> " + "; ".join(card.risks), styles["BodyText"]))
         if card.opportunities:
             story.append(
-                Paragraph(
-                    "<b>Opportunities:</b> " + "; ".join(card.opportunities), styles["BodyText"]
-                )
+                Paragraph("<b>Opportunities:</b> " + "; ".join(card.opportunities), styles["BodyText"])
             )
-        story.append(
-            Paragraph(f"<b>Recommendation:</b> {card.recommendation}", styles["BodyText"])
-        )
+        story.append(Paragraph(f"<b>Recommendation:</b> {card.recommendation}", styles["BodyText"]))
         if card.forecast_value or card.forecast_explanation:
             story.append(
                 Paragraph(

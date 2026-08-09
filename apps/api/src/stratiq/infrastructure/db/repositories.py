@@ -15,17 +15,28 @@ from stratiq.domain.entities import (
     ChatSession,
     Chunk,
     Citation,
+    DecisionCard,
     Document,
+    ExecutiveReport,
     KPI,
     User,
 )
-from stratiq.domain.enums import AuditEventType, DocumentStatus, KPIDomain
+from stratiq.domain.enums import (
+    AuditEventType,
+    DocumentStatus,
+    EvidenceMode,
+    HealthLabel,
+    KPIDomain,
+    TrendDirection,
+)
 from stratiq.infrastructure.db.models import (
     AuditEventModel,
     ChatMessageModel,
     ChatSessionModel,
     ChunkModel,
+    DecisionCardModel,
     DocumentModel,
+    ExecutiveReportModel,
     KPIModel,
     UserModel,
 )
@@ -345,3 +356,142 @@ class AuditRepository:
         )
         self._session.add(model)
         await self._session.flush()
+
+
+def _card_from_model(m: DecisionCardModel) -> DecisionCard:
+    return DecisionCard(
+        id=m.id,
+        owner_id=m.owner_id,
+        kpi_id=m.kpi_id,
+        document_id=m.document_id,
+        kpi_name=m.kpi_name,
+        current_value=m.current_value,
+        unit=m.unit,
+        period=m.period,
+        domain=m.domain,
+        trend=TrendDirection(m.trend),
+        health=HealthLabel(m.health),
+        what_happened=m.what_happened,
+        why_it_happened=m.why_it_happened,
+        business_impact=m.business_impact or "",
+        risks=list(m.risks or []),
+        opportunities=list(m.opportunities or []),
+        recommendation=m.recommendation,
+        forecast_value=m.forecast_value,
+        forecast_horizon=m.forecast_horizon,
+        forecast_explanation=m.forecast_explanation,
+        confidence=float(m.confidence or 0.5),
+        evidence_mode=EvidenceMode(m.evidence_mode or EvidenceMode.evidence.value),
+        evidence_chunk_ids=[uuid.UUID(str(x)) for x in (m.evidence_chunk_ids or [])],
+        related_kpi_ids=[uuid.UUID(str(x)) for x in (m.related_kpi_ids or [])],
+        created_at=m.created_at,
+    )
+
+
+def _report_from_model(m: ExecutiveReportModel) -> ExecutiveReport:
+    return ExecutiveReport(
+        id=m.id,
+        owner_id=m.owner_id,
+        summary=m.summary,
+        health_score=m.health_score,
+        health_label=HealthLabel(m.health_label),
+        timeline=list(m.timeline or []),
+        document_id=m.document_id,
+        confidence=float(m.confidence or 0.5),
+        created_at=m.created_at,
+    )
+
+
+class DecisionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def replace_cards(
+        self,
+        owner_id: uuid.UUID,
+        cards: list[DecisionCard],
+        document_id: uuid.UUID | None = None,
+    ) -> list[DecisionCard]:
+        stmt = delete(DecisionCardModel).where(DecisionCardModel.owner_id == owner_id)
+        if document_id is not None:
+            stmt = stmt.where(DecisionCardModel.document_id == document_id)
+        await self._session.execute(stmt)
+        models = []
+        for card in cards:
+            model = DecisionCardModel(
+                id=card.id,
+                owner_id=owner_id,
+                kpi_id=card.kpi_id,
+                document_id=card.document_id,
+                kpi_name=card.kpi_name,
+                current_value=card.current_value,
+                unit=card.unit,
+                period=card.period,
+                domain=card.domain,
+                trend=card.trend.value,
+                health=card.health.value,
+                what_happened=card.what_happened,
+                why_it_happened=card.why_it_happened,
+                business_impact=card.business_impact,
+                risks=card.risks,
+                opportunities=card.opportunities,
+                recommendation=card.recommendation,
+                forecast_value=card.forecast_value,
+                forecast_horizon=card.forecast_horizon,
+                forecast_explanation=card.forecast_explanation,
+                confidence=str(card.confidence),
+                evidence_mode=card.evidence_mode.value,
+                evidence_chunk_ids=[str(x) for x in card.evidence_chunk_ids],
+                related_kpi_ids=[str(x) for x in card.related_kpi_ids],
+                created_at=card.created_at or datetime.now(UTC),
+            )
+            self._session.add(model)
+            models.append(model)
+        await self._session.flush()
+        return [_card_from_model(m) for m in models]
+
+    async def list_cards(
+        self, owner_id: uuid.UUID, document_id: uuid.UUID | None = None
+    ) -> list[DecisionCard]:
+        stmt = select(DecisionCardModel).where(DecisionCardModel.owner_id == owner_id)
+        if document_id is not None:
+            stmt = stmt.where(DecisionCardModel.document_id == document_id)
+        stmt = stmt.order_by(DecisionCardModel.created_at.desc())
+        result = await self._session.execute(stmt)
+        return [_card_from_model(m) for m in result.scalars().all()]
+
+    async def get_card(self, card_id: uuid.UUID, owner_id: uuid.UUID) -> DecisionCard | None:
+        result = await self._session.execute(
+            select(DecisionCardModel).where(
+                DecisionCardModel.id == card_id, DecisionCardModel.owner_id == owner_id
+            )
+        )
+        model = result.scalar_one_or_none()
+        return _card_from_model(model) if model else None
+
+    async def save_executive_report(self, report: ExecutiveReport) -> ExecutiveReport:
+        model = ExecutiveReportModel(
+            id=report.id,
+            owner_id=report.owner_id,
+            document_id=report.document_id,
+            summary=report.summary,
+            health_score=report.health_score,
+            health_label=report.health_label.value,
+            timeline=report.timeline,
+            confidence=str(report.confidence),
+            created_at=report.created_at or datetime.now(UTC),
+        )
+        self._session.add(model)
+        await self._session.flush()
+        return _report_from_model(model)
+
+    async def get_latest_executive_report(
+        self, owner_id: uuid.UUID, document_id: uuid.UUID | None = None
+    ) -> ExecutiveReport | None:
+        stmt = select(ExecutiveReportModel).where(ExecutiveReportModel.owner_id == owner_id)
+        if document_id is not None:
+            stmt = stmt.where(ExecutiveReportModel.document_id == document_id)
+        stmt = stmt.order_by(ExecutiveReportModel.created_at.desc()).limit(1)
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        return _report_from_model(model) if model else None

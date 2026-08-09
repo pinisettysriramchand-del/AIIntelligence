@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from stratiq.domain.enums import HealthLabel
 from stratiq.domain.entities import DecisionCard
+from stratiq.domain.enums import HealthLabel
 
 
-def label_for_score(score: int) -> str:
+def label_for_score(score: int) -> HealthLabel:
     if score < 40:
-        return HealthLabel.CRITICAL
+        return HealthLabel.critical
     if score < 70:
-        return HealthLabel.WATCH
-    return HealthLabel.HEALTHY
+        return HealthLabel.watch
+    return HealthLabel.healthy
 
 
 def compute_health_score(
@@ -17,13 +17,13 @@ def compute_health_score(
     ready_documents: int,
     failed_documents: int,
     llm_score: int | None = None,
-) -> tuple[int, str]:
+) -> tuple[int, HealthLabel]:
     score = 65
     score += min(ready_documents, 3) * 5
     score -= failed_documents * 8
-    critical = sum(1 for c in cards if c.health == HealthLabel.CRITICAL)
-    watch = sum(1 for c in cards if c.health == HealthLabel.WATCH)
-    healthy = sum(1 for c in cards if c.health == HealthLabel.HEALTHY)
+    critical = sum(1 for c in cards if c.health == HealthLabel.critical)
+    watch = sum(1 for c in cards if c.health == HealthLabel.watch)
+    healthy = sum(1 for c in cards if c.health == HealthLabel.healthy)
     score -= critical * 12
     score -= watch * 4
     score += healthy * 3

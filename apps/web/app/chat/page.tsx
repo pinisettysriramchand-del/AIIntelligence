@@ -44,14 +44,19 @@ export default function ChatPage() {
       { id: `local-${Date.now()}`, role: "user", content: pending, citations: [] },
     ]);
     try {
-      const answer = await api<Message & { session_id: string }>("/api/chat", {
+      let activeSessionId = sessionId;
+      if (!activeSessionId) {
+        const session = await api<{ id: string }>("/api/v1/chat/sessions", {
+          method: "POST",
+          body: JSON.stringify({ title: pending.slice(0, 80) || "New Chat" }),
+        });
+        activeSessionId = session.id;
+        setSessionId(activeSessionId);
+      }
+      const answer = await api<Message>(`/api/v1/chat/sessions/${activeSessionId}/messages`, {
         method: "POST",
-        body: JSON.stringify({
-          question: pending,
-          session_id: sessionId,
-        }),
+        body: JSON.stringify({ content: pending }),
       });
-      setSessionId(answer.session_id);
       setMessages((prev) => [...prev, answer]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chat failed");
@@ -77,7 +82,7 @@ export default function ChatPage() {
               <div>{msg.content}</div>
               {msg.citations?.map((c) => (
                 <div className="citation" key={`${msg.id}-${c.chunk_id}`}>
-                  [{c.chunk_id.slice(0, 8)}] {c.excerpt}
+                  [{String(c.chunk_id).slice(0, 8)}] {c.excerpt}
                 </div>
               ))}
             </div>

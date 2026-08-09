@@ -39,7 +39,7 @@ class TabularParser:
         for sheet_name in xf.sheet_names:
             df = pd.read_excel(xf, sheet_name=sheet_name, nrows=_MAX_ROWS_PER_SHEET)
             df = df.dropna(how="all")
-            md = df.to_markdown(index=False)
+            md = _frame_to_markdown(df)
             sections.append(f"## Sheet: {sheet_name}\n\n{md}")
         result = "\n\n".join(sections)
         logger.debug("Excel parsed", extra={"sheets": len(sections), "chars": len(result)})
@@ -48,6 +48,15 @@ class TabularParser:
     def _parse_csv(self, data: bytes) -> str:
         df = pd.read_csv(io.BytesIO(data), nrows=_MAX_ROWS_PER_SHEET)
         df = df.dropna(how="all")
-        result = df.to_markdown(index=False)
+        result = _frame_to_markdown(df)
         logger.debug("CSV parsed", extra={"rows": len(df), "chars": len(result)})
         return result or ""
+
+
+def _frame_to_markdown(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "_No rows_"
+    try:
+        return df.to_markdown(index=False)
+    except ImportError:
+        return df.to_string(index=False)

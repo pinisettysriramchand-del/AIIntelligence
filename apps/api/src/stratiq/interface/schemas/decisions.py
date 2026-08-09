@@ -18,12 +18,15 @@ class DecisionCardResponse(BaseModel):
     health: str
     what_happened: str
     why_it_happened: str
+    business_impact: str
     risks: list[str]
     opportunities: list[str]
     recommendation: str
     forecast_value: str | None = None
     forecast_horizon: str | None = None
     forecast_explanation: str | None = None
+    confidence: float
+    evidence_mode: str
     evidence_chunk_ids: list[str]
     related_kpi_ids: list[str] = Field(default_factory=list)
 
@@ -35,6 +38,7 @@ class ExecutiveReportResponse(BaseModel):
     health_label: str
     timeline: list[dict]
     document_id: str | None = None
+    confidence: float = 0.0
 
 
 class GenerateDecisionsResponse(BaseModel):
@@ -51,3 +55,5 @@ class ForecastResponse(BaseModel):
     forecast_horizon: str | None = None
     forecast_explanation: str | None = None
     trend: str
+    confidence: float = 0.0
+    evidence_mode: str = "evidence"

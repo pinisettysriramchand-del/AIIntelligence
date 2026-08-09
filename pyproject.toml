@@ -19,3 +19,9 @@ stratiq = { workspace = true }
 
 [tool.uv.workspace]
 members = ["apps/api"]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "reportlab>=5.0.0",
+]

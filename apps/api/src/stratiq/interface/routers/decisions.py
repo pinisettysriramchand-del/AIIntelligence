@@ -1,10 +1,14 @@
-from uuid import UUID
+"""Decision Intelligence and forecast routers."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from __future__ import annotations
 
-from stratiq.domain.entities import DecisionCard, ExecutiveReport, User
-from stratiq.domain.exceptions import NotFoundError, ValidationError
-from stratiq.interface.deps import Services, get_current_user, get_services
+import uuid
+
+from fastapi import APIRouter, Depends, Query, status
+
+from stratiq.application.decisions import DecisionIntelligenceService
+from stratiq.domain.entities import DecisionCard, ExecutiveReport
+from stratiq.interface.deps import CurrentUser, get_decision_service
 from stratiq.interface.schemas.decisions import (
     DecisionCardResponse,
     ExecutiveReportResponse,
@@ -26,18 +30,21 @@ def _card(card: DecisionCard) -> DecisionCardResponse:
         unit=card.unit,
         period=card.period,
         domain=card.domain,
-        trend=card.trend,
-        health=card.health,
+        trend=card.trend.value,
+        health=card.health.value,
         what_happened=card.what_happened,
         why_it_happened=card.why_it_happened,
+        business_impact=card.business_impact,
         risks=card.risks,
         opportunities=card.opportunities,
         recommendation=card.recommendation,
         forecast_value=card.forecast_value,
         forecast_horizon=card.forecast_horizon,
         forecast_explanation=card.forecast_explanation,
-        evidence_chunk_ids=card.evidence_chunk_ids,
-        related_kpi_ids=card.related_kpi_ids,
+        confidence=card.confidence,
+        evidence_mode=card.evidence_mode.value,
+        evidence_chunk_ids=[str(x) for x in card.evidence_chunk_ids],
+        related_kpi_ids=[str(x) for x in card.related_kpi_ids],
     )
 
 
@@ -46,9 +53,10 @@ def _report(report: ExecutiveReport) -> ExecutiveReportResponse:
         id=str(report.id),
         summary=report.summary,
         health_score=report.health_score,
-        health_label=report.health_label,
+        health_label=report.health_label.value,
         timeline=report.timeline,
         document_id=str(report.document_id) if report.document_id else None,
+        confidence=report.confidence,
     )
 
 
@@ -59,18 +67,13 @@ def _report(report: ExecutiveReport) -> ExecutiveReportResponse:
 )
 async def generate_decisions(
     body: GenerateDecisionsRequest,
-    user: User = Depends(get_current_user),
-    services: Services = Depends(get_services),
+    current_user: CurrentUser,
+    svc: DecisionIntelligenceService = Depends(get_decision_service),
 ) -> GenerateDecisionsResponse:
-    try:
-        result = await services.decisions.generate(
-            user.id,
-            UUID(body.document_id) if body.document_id else None,
-        )
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    result = await svc.generate(
+        current_user.id,
+        uuid.UUID(body.document_id) if body.document_id else None,
+    )
     return GenerateDecisionsResponse(
         report=_report(result["report"]),
         cards=[_card(c) for c in result["cards"]],
@@ -79,45 +82,39 @@ async def generate_decisions(
 
 @router.get("/decisions/cards", response_model=list[DecisionCardResponse])
 async def list_cards(
-    document_id: UUID | None = Query(default=None),
-    user: User = Depends(get_current_user),
-    services: Services = Depends(get_services),
+    current_user: CurrentUser,
+    document_id: uuid.UUID | None = Query(default=None),
+    svc: DecisionIntelligenceService = Depends(get_decision_service),
 ) -> list[DecisionCardResponse]:
-    cards = await services.decisions.list_cards(user.id, document_id)
+    cards = await svc.list_cards(current_user.id, document_id)
     return [_card(c) for c in cards]
 
 
 @router.get("/decisions/cards/{card_id}", response_model=DecisionCardResponse)
 async def get_card(
-    card_id: UUID,
-    user: User = Depends(get_current_user),
-    services: Services = Depends(get_services),
+    card_id: uuid.UUID,
+    current_user: CurrentUser,
+    svc: DecisionIntelligenceService = Depends(get_decision_service),
 ) -> DecisionCardResponse:
-    try:
-        card = await services.decisions.get_card(card_id, user.id)
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    card = await svc.get_card(card_id, current_user.id)
     return _card(card)
 
 
 @router.get("/decisions/executive", response_model=ExecutiveReportResponse)
 async def get_executive(
-    document_id: UUID | None = Query(default=None),
-    user: User = Depends(get_current_user),
-    services: Services = Depends(get_services),
+    current_user: CurrentUser,
+    document_id: uuid.UUID | None = Query(default=None),
+    svc: DecisionIntelligenceService = Depends(get_decision_service),
 ) -> ExecutiveReportResponse:
-    try:
-        report = await services.decisions.get_executive(user.id, document_id)
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    report = await svc.get_executive(current_user.id, document_id)
     return _report(report)
 
 
 @router.get("/forecasts", response_model=list[ForecastResponse])
 async def list_forecasts(
-    document_id: UUID | None = Query(default=None),
-    user: User = Depends(get_current_user),
-    services: Services = Depends(get_services),
+    current_user: CurrentUser,
+    document_id: uuid.UUID | None = Query(default=None),
+    svc: DecisionIntelligenceService = Depends(get_decision_service),
 ) -> list[ForecastResponse]:
-    items = await services.decisions.list_forecasts(user.id, document_id)
+    items = await svc.list_forecasts(current_user.id, document_id)
     return [ForecastResponse(**item) for item in items]

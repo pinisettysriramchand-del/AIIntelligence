@@ -62,3 +62,29 @@ class AuditService:
             user_id,
             {"session_id": str(session_id), "msg_id": str(msg_id)},
         )
+
+    async def log_decisions_generated(
+        self,
+        user_id: uuid.UUID,
+        report_id: uuid.UUID,
+        card_count: int,
+        health_score: int,
+    ) -> None:
+        await self._emit(
+            AuditEventType.decisions_generated,
+            user_id,
+            {
+                "report_id": str(report_id),
+                "card_count": card_count,
+                "health_score": health_score,
+            },
+        )
+
+    async def log_report_exported(
+        self, user_id: uuid.UUID, report_id: uuid.UUID, bytes_len: int
+    ) -> None:
+        await self._emit(
+            AuditEventType.report_exported,
+            user_id,
+            {"report_id": str(report_id), "bytes": bytes_len},
+        )

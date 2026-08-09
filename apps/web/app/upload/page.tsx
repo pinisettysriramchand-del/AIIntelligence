@@ -21,7 +21,7 @@ export default function UploadPage() {
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
-    const list = await api<{ items: DocumentItem[] }>("/api/documents");
+    const list = await api<{ items: DocumentItem[] }>("/api/v1/documents");
     setItems(list.items);
   }
 
@@ -42,11 +42,11 @@ export default function UploadPage() {
     try {
       const body = new FormData();
       body.append("file", file);
-      const doc = await api<DocumentItem>("/api/documents/upload", {
+      const doc = await api<DocumentItem>("/api/v1/documents", {
         method: "POST",
         body,
       });
-      await api(`/api/documents/${doc.id}/process`, { method: "POST" });
+      await api(`/api/v1/documents/${doc.id}/process`, { method: "POST" });
       setMessage(`Uploaded and queued: ${doc.filename}`);
       setFile(null);
       await refresh();

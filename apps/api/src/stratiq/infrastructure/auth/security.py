@@ -8,9 +8,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import bcrypt
 import redis.asyncio as aioredis
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from stratiq.domain.exceptions import AuthenticationError
 
@@ -18,8 +18,6 @@ logger = logging.getLogger(__name__)
 
 _REFRESH_PREFIX = "refresh:"
 _BLACKLIST_PREFIX = "blacklist:"
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class SecurityHelper:
@@ -40,10 +38,17 @@ class SecurityHelper:
     # ── Password ──────────────────────────────────────────────────────────────
 
     def hash_password(self, plain: str) -> str:
-        return _pwd_context.hash(plain)
+        # bcrypt has a 72-byte input limit; enforce explicitly for clear errors.
+        password_bytes = plain.encode("utf-8")
+        if len(password_bytes) > 72:
+            raise AuthenticationError("Password cannot exceed 72 bytes.")
+        return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
 
     def verify_password(self, plain: str, hashed: str) -> bool:
-        return _pwd_context.verify(plain, hashed)
+        try:
+            return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+        except ValueError:
+            return False
 
     # ── Access token ──────────────────────────────────────────────────────────
 

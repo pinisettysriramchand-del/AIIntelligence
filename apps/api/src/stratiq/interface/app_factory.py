@@ -23,7 +23,7 @@ from stratiq.domain.exceptions import (
 )
 from stratiq.infrastructure.db.session import close_db, init_db
 from stratiq.infrastructure.redis_client import close_redis, init_redis
-from stratiq.interface.routers import auth, chat, dashboard, documents, kpis
+from stratiq.interface.routers import auth, chat, dashboard, decisions, documents, kpis, reports
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(kpis.router, prefix="/api/v1")
     app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(chat.router, prefix="/api/v1")
+    app.include_router(decisions.router, prefix="/api/v1")
+    app.include_router(reports.router, prefix="/api/v1")
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:
