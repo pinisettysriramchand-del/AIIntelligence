@@ -68,16 +68,30 @@ class ProcessingService:
         self._collection = qdrant_collection
         self._audit = audit_service
 
-    async def process_document(self, document_id: uuid.UUID) -> None:
+    async def process_document(
+        self,
+        document_id: uuid.UUID,
+        *,
+        attempt: int = 1,
+        max_attempts: int = 3,
+    ) -> None:
         from stratiq.domain.entities import Chunk, KPI
 
-        logger.info("Processing document", extra={"doc_id": str(document_id)})
+        logger.info(
+            "Processing document",
+            extra={"doc_id": str(document_id), "attempt": attempt, "max_attempts": max_attempts},
+        )
         doc = await self._docs.get_by_id(document_id)
         if doc is None:
             raise ProcessingError(f"Document {document_id} not found.")
 
         timer = Timer()
         try:
+            # Idempotent reprocess: replace prior pipeline artifacts for this document.
+            await self._kpis.delete_by_document(document_id)
+            await self._chunks.delete_by_document(document_id)
+            await self._vectors.delete_by_document(self._collection, document_id)
+
             raw_bytes = await self._storage.load(doc.storage_path)
             parser = self._parser_factory.get_parser(doc.mime_type, doc.original_filename)
             markdown_text = parser.parse(raw_bytes)
@@ -192,6 +206,7 @@ class ProcessingService:
             await self._docs.update_status(
                 document_id,
                 DocumentStatus.ready,
+                error_message="",
                 quality_warnings=quality_warnings,
             )
             await self._audit.log_document_processed(doc.owner_id, document_id, len(kpi_entities))
@@ -203,14 +218,28 @@ class ProcessingService:
                     "chunks": len(chunk_entities),
                     "kpis": len(kpi_entities),
                     "quality_warnings": len(quality_warnings),
+                    "domains": detected_domains,
                 },
             )
 
         except Exception as exc:
             get_metrics().record_processing(timer.ms(), failed=True)
-            logger.exception("Document processing failed", extra={"doc_id": str(document_id)})
-            await self._docs.update_status(document_id, DocumentStatus.failed, error_message=str(exc))
-            await self._audit.log_document_failed(doc.owner_id, document_id, str(exc))
+            logger.exception(
+                "Document processing failed",
+                extra={"doc_id": str(document_id), "attempt": attempt},
+            )
+            is_final = attempt >= max_attempts
+            if is_final:
+                await self._docs.update_status(
+                    document_id, DocumentStatus.failed, error_message=str(exc)
+                )
+                await self._audit.log_document_failed(doc.owner_id, document_id, str(exc))
+            else:
+                await self._docs.update_status(
+                    document_id,
+                    DocumentStatus.processing,
+                    error_message=f"Attempt {attempt}/{max_attempts} failed: {exc}",
+                )
             raise ProcessingError(str(exc)) from exc
 
     def _domain_for(self, raw: str) -> "KPIDomain":

@@ -10,6 +10,14 @@ class DocumentStatus(str, Enum):
     failed = "failed"
 
 
+class ProcessingJobStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+    dead_letter = "dead_letter"
+
+
 class KPIDomain(str, Enum):
     financial = "financial"
     operational = "operational"

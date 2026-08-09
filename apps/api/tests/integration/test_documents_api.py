@@ -147,8 +147,20 @@ class TestDocumentProcess:
         doc_id = upload.json()["id"]
 
         response = await client.post(f"/api/v1/documents/{doc_id}/process", headers=headers)
-        assert response.status_code == 200
-        assert "queued" in response.json()["message"].lower()
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["document_id"] == doc_id
+        assert body["status"] == "queued"
+        assert body["max_attempts"] >= 1
+        assert "process:" in body["idempotency_key"]
+
+        again = await client.post(f"/api/v1/documents/{doc_id}/process", headers=headers)
+        assert again.status_code == 200
+        assert again.json()["id"] == body["id"]
+
+        jobs = await client.get(f"/api/v1/documents/{doc_id}/jobs", headers=headers)
+        assert jobs.status_code == 200
+        assert jobs.json()["total"] >= 1
 
     @pytest.mark.asyncio
     async def test_process_nonexistent_returns_404(self, auth_client):

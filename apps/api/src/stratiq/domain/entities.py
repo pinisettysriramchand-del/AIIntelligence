@@ -7,7 +7,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from stratiq.domain.enums import AuditEventType, DocumentStatus, EvidenceMode, HealthLabel, KPIDomain, TrendDirection
+from stratiq.domain.enums import (
+    AuditEventType,
+    DocumentStatus,
+    EvidenceMode,
+    HealthLabel,
+    KPIDomain,
+    ProcessingJobStatus,
+    TrendDirection,
+)
 
 
 @dataclass
@@ -35,6 +43,23 @@ class Document:
     created_at: datetime
     updated_at: datetime
     quality_warnings: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class ProcessingJob:
+    id: uuid.UUID
+    document_id: uuid.UUID
+    owner_id: uuid.UUID
+    status: ProcessingJobStatus
+    attempt: int
+    max_attempts: int
+    idempotency_key: str
+    arq_job_id: str | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 @dataclass

@@ -8,10 +8,16 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 
 from stratiq.application.documents import DocumentService
 from stratiq.config import Settings, get_settings
+from stratiq.domain.entities import Document, ProcessingJob
 from stratiq.domain.exceptions import AuthorizationError, NotFoundError, StorageError
 from stratiq.interface.deps import CurrentUser, get_document_service
 from stratiq.interface.schemas.common import MessageResponse
-from stratiq.interface.schemas.documents import DocumentListResponse, DocumentResponse
+from stratiq.interface.schemas.documents import (
+    DocumentListResponse,
+    DocumentResponse,
+    ProcessingJobListResponse,
+    ProcessingJobResponse,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -55,19 +61,56 @@ async def upload_document(
     return _doc_response(doc)
 
 
-@router.post("/{doc_id}/process", response_model=MessageResponse)
+@router.post("/{doc_id}/process", response_model=ProcessingJobResponse)
 async def process_document(
     doc_id: uuid.UUID,
     current_user: CurrentUser,
     doc_svc: DocumentService = Depends(get_document_service),
-) -> MessageResponse:
+) -> ProcessingJobResponse:
     try:
-        await doc_svc.enqueue_processing(doc_id, current_user.id)
+        job = await doc_svc.enqueue_processing(doc_id, current_user.id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except AuthorizationError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    return MessageResponse(message="Document queued for processing.")
+    return _job_response(job)
+
+
+@router.get("/jobs/dead-letter", response_model=ProcessingJobListResponse)
+async def list_dead_letter_jobs(
+    current_user: CurrentUser,
+    doc_svc: DocumentService = Depends(get_document_service),
+) -> ProcessingJobListResponse:
+    jobs = await doc_svc.list_dead_letter_jobs(current_user.id)
+    return ProcessingJobListResponse(items=[_job_response(j) for j in jobs], total=len(jobs))
+
+
+@router.get("/jobs/{job_id}", response_model=ProcessingJobResponse)
+async def get_processing_job(
+    job_id: uuid.UUID,
+    current_user: CurrentUser,
+    doc_svc: DocumentService = Depends(get_document_service),
+) -> ProcessingJobResponse:
+    try:
+        job = await doc_svc.get_job(job_id, current_user.id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _job_response(job)
+
+
+@router.get("/{doc_id}/jobs", response_model=ProcessingJobListResponse)
+async def list_document_jobs(
+    doc_id: uuid.UUID,
+    current_user: CurrentUser,
+    doc_svc: DocumentService = Depends(get_document_service),
+) -> ProcessingJobListResponse:
+    try:
+        jobs = await doc_svc.list_jobs(doc_id, current_user.id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AuthorizationError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    return ProcessingJobListResponse(items=[_job_response(j) for j in jobs], total=len(jobs))
 
 
 @router.get("", response_model=DocumentListResponse)
@@ -109,10 +152,7 @@ async def delete_document(
     return MessageResponse(message="Document deleted.")
 
 
-def _doc_response(doc: object) -> DocumentResponse:
-    from stratiq.domain.entities import Document
-
-    assert isinstance(doc, Document)
+def _doc_response(doc: Document) -> DocumentResponse:
     return DocumentResponse(
         id=doc.id,
         owner_id=doc.owner_id,
@@ -125,4 +165,22 @@ def _doc_response(doc: object) -> DocumentResponse:
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         quality_warnings=doc.quality_warnings or [],
+    )
+
+
+def _job_response(job: ProcessingJob) -> ProcessingJobResponse:
+    return ProcessingJobResponse(
+        id=job.id,
+        document_id=job.document_id,
+        owner_id=job.owner_id,
+        status=job.status.value,
+        attempt=job.attempt,
+        max_attempts=job.max_attempts,
+        idempotency_key=job.idempotency_key,
+        arq_job_id=job.arq_job_id,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
     )

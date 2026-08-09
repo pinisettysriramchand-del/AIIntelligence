@@ -40,6 +40,7 @@ from stratiq.infrastructure.db.repositories import (
     DecisionRepository,
     DocumentRepository,
     KPIRepository,
+    ProcessingJobRepository,
     UserRepository,
 )
 from stratiq.infrastructure.db.session import get_db_session
@@ -94,6 +95,10 @@ def get_chunk_repo(session=Depends(get_db_session)) -> ChunkRepository:
 
 def get_kpi_repo(session=Depends(get_db_session)) -> KPIRepository:
     return KPIRepository(session)
+
+
+def get_job_repo(session=Depends(get_db_session)) -> ProcessingJobRepository:
+    return ProcessingJobRepository(session)
 
 
 def get_session_repo(session=Depends(get_db_session)) -> ChatSessionRepository:
@@ -168,12 +173,21 @@ def get_auth_service(
 
 
 def get_document_service(
+    settings: SettingsDep,
     doc_repo: DocumentRepository = Depends(get_doc_repo),
     storage: LocalFileStorage = Depends(get_storage),
     queue: ArqTaskQueue = Depends(get_task_queue),
     audit: AuditService = Depends(get_audit_service),
+    job_repo: ProcessingJobRepository = Depends(get_job_repo),
 ) -> DocumentService:
-    return DocumentService(doc_repo, storage, queue, audit)
+    return DocumentService(
+        doc_repo,
+        storage,
+        queue,
+        audit,
+        job_repo=job_repo,
+        max_attempts=settings.processing_max_tries,
+    )
 
 
 def get_kpi_service(

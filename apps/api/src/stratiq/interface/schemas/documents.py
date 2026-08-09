@@ -31,3 +31,24 @@ class DocumentResponse(BaseModel):
 class DocumentListResponse(BaseModel):
     items: list[DocumentResponse]
     total: int
+
+
+class ProcessingJobResponse(BaseModel):
+    id: uuid.UUID
+    document_id: uuid.UUID
+    owner_id: uuid.UUID
+    status: str
+    attempt: int
+    max_attempts: int
+    idempotency_key: str
+    arq_job_id: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class ProcessingJobListResponse(BaseModel):
+    items: list[ProcessingJobResponse]
+    total: int

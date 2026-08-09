@@ -134,7 +134,7 @@ class FakeTaskQueue:
         self.jobs: list[dict] = []
 
     async def enqueue(self, function_name: str, **kwargs: Any) -> str:
-        job_id = str(uuid.uuid4())
+        job_id = str(kwargs.pop("_job_id", None) or uuid.uuid4())
         self.jobs.append({"function": function_name, "kwargs": kwargs, "job_id": job_id})
         return job_id
 

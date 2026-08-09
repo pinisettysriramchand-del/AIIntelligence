@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     chunk_size: int = 800
     chunk_overlap: int = 100
     max_upload_bytes: int = 50 * 1024 * 1024  # 50 MB
+    processing_max_tries: int = 3
+    processing_retry_defer_seconds: int = 5
+    processing_dlq_key: str = "stratiq:dlq:process_document"
 
     # OpenTelemetry (disabled by default; set OTEL_ENABLED=true)
     otel_enabled: bool = False

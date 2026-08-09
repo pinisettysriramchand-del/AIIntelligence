@@ -19,6 +19,7 @@ from stratiq.domain.entities import (
     Document,
     ExecutiveReport,
     KPI,
+    ProcessingJob,
     User,
 )
 from stratiq.domain.enums import (
@@ -27,6 +28,7 @@ from stratiq.domain.enums import (
     EvidenceMode,
     HealthLabel,
     KPIDomain,
+    ProcessingJobStatus,
     TrendDirection,
 )
 from stratiq.infrastructure.db.models import (
@@ -38,6 +40,7 @@ from stratiq.infrastructure.db.models import (
     DocumentModel,
     ExecutiveReportModel,
     KPIModel,
+    ProcessingJobModel,
     UserModel,
 )
 
@@ -256,6 +259,10 @@ class ChunkRepository:
         )
         return [_chunk_from_model(m) for m in result.scalars().all()]
 
+    async def delete_by_document(self, document_id: uuid.UUID) -> None:
+        await self._session.execute(delete(ChunkModel).where(ChunkModel.document_id == document_id))
+        await self._session.flush()
+
 
 class KPIRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -308,6 +315,130 @@ class KPIRepository:
         stmt = stmt.order_by(KPIModel.created_at.desc())
         result = await self._session.execute(stmt)
         return [_kpi_from_model(m) for m in result.scalars().all()]
+
+    async def delete_by_document(self, document_id: uuid.UUID) -> None:
+        await self._session.execute(delete(KPIModel).where(KPIModel.document_id == document_id))
+        await self._session.flush()
+
+
+def _job_from_model(m: ProcessingJobModel) -> ProcessingJob:
+    return ProcessingJob(
+        id=m.id,
+        document_id=m.document_id,
+        owner_id=m.owner_id,
+        status=ProcessingJobStatus(m.status),
+        attempt=m.attempt,
+        max_attempts=m.max_attempts,
+        idempotency_key=m.idempotency_key,
+        arq_job_id=m.arq_job_id,
+        error_message=m.error_message,
+        created_at=m.created_at,
+        updated_at=m.updated_at,
+        started_at=m.started_at,
+        finished_at=m.finished_at,
+    )
+
+
+class ProcessingJobRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def save(self, job: ProcessingJob) -> ProcessingJob:
+        model = ProcessingJobModel(
+            id=job.id,
+            document_id=job.document_id,
+            owner_id=job.owner_id,
+            status=job.status.value,
+            attempt=job.attempt,
+            max_attempts=job.max_attempts,
+            idempotency_key=job.idempotency_key,
+            arq_job_id=job.arq_job_id,
+            error_message=job.error_message,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+        )
+        self._session.add(model)
+        await self._session.flush()
+        return _job_from_model(model)
+
+    async def get_by_id(self, job_id: uuid.UUID) -> ProcessingJob | None:
+        result = await self._session.execute(
+            select(ProcessingJobModel).where(ProcessingJobModel.id == job_id)
+        )
+        model = result.scalar_one_or_none()
+        return _job_from_model(model) if model else None
+
+    async def get_active_for_document(self, document_id: uuid.UUID) -> ProcessingJob | None:
+        result = await self._session.execute(
+            select(ProcessingJobModel)
+            .where(
+                ProcessingJobModel.document_id == document_id,
+                ProcessingJobModel.status.in_(
+                    [ProcessingJobStatus.queued.value, ProcessingJobStatus.running.value]
+                ),
+            )
+            .order_by(ProcessingJobModel.created_at.desc())
+            .limit(1)
+        )
+        model = result.scalar_one_or_none()
+        return _job_from_model(model) if model else None
+
+    async def list_by_document(self, document_id: uuid.UUID, owner_id: uuid.UUID) -> list[ProcessingJob]:
+        result = await self._session.execute(
+            select(ProcessingJobModel)
+            .where(
+                ProcessingJobModel.document_id == document_id,
+                ProcessingJobModel.owner_id == owner_id,
+            )
+            .order_by(ProcessingJobModel.created_at.desc())
+        )
+        return [_job_from_model(m) for m in result.scalars().all()]
+
+    async def list_dead_letters(self, owner_id: uuid.UUID, limit: int = 50) -> list[ProcessingJob]:
+        result = await self._session.execute(
+            select(ProcessingJobModel)
+            .where(
+                ProcessingJobModel.owner_id == owner_id,
+                ProcessingJobModel.status == ProcessingJobStatus.dead_letter.value,
+            )
+            .order_by(ProcessingJobModel.updated_at.desc())
+            .limit(limit)
+        )
+        return [_job_from_model(m) for m in result.scalars().all()]
+
+    async def update(
+        self,
+        job_id: uuid.UUID,
+        *,
+        status: ProcessingJobStatus | None = None,
+        attempt: int | None = None,
+        arq_job_id: str | None = None,
+        error_message: str | None = None,
+        clear_error: bool = False,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+    ) -> None:
+        values: dict[str, Any] = {"updated_at": datetime.now(UTC)}
+        if status is not None:
+            values["status"] = status.value
+        if attempt is not None:
+            values["attempt"] = attempt
+        if arq_job_id is not None:
+            values["arq_job_id"] = arq_job_id
+        if clear_error:
+            values["error_message"] = None
+        elif error_message is not None:
+            values["error_message"] = error_message
+        if started_at is not None:
+            values["started_at"] = started_at
+        if finished_at is not None:
+            values["finished_at"] = finished_at
+        await self._session.execute(
+            update(ProcessingJobModel).where(ProcessingJobModel.id == job_id).values(**values)
+        )
+        await self._session.flush()
 
 
 class ChatSessionRepository:
