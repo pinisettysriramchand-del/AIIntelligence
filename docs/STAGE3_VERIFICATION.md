@@ -109,5 +109,5 @@ Core journey (auth → upload → KPI/DI → export) is implemented and covered 
 | FR-005 KPI comparisons | Done | Dashboard derives period deltas/trends; UI shows vs prior period |
 | FR-007 Insufficient-evidence chat | Done | Early return without LLM; `evidence_sufficient` flag + UI banner |
 | FR-008 Forecast insufficient history | Done | All cards listed; `status=insufficient_history` + UI messaging |
-| Observability metrics | Done | Process-local `/metrics`: API latency, AI latency/tokens, processing, retrieval emptiness |
+| Observability metrics | Done | Process-local `/metrics` + OpenTelemetry (ADR-006); enable via `OTEL_ENABLED` |
 

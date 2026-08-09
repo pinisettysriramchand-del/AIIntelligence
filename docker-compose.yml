@@ -110,6 +110,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Optional: docker compose --profile otel up
+  otel-collector:
+    profiles: ["otel"]
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./deploy/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP HTTP
+      - "4317:4317"   # OTLP gRPC
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

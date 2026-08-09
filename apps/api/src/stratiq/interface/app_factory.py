@@ -25,6 +25,7 @@ from stratiq.domain.exceptions import (
 )
 from stratiq.infrastructure.db.session import close_db, init_db
 from stratiq.infrastructure.observability import get_metrics
+from stratiq.infrastructure.observability.otel import instrument_fastapi, setup_otel
 from stratiq.infrastructure.redis_client import close_redis, init_redis
 from stratiq.interface.routers import auth, chat, dashboard, decisions, documents, kpis, reports
 
@@ -109,7 +110,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/metrics", tags=["observability"])
     async def metrics() -> dict:
         """Process-local MVP metrics (API latency, AI, processing, retrieval)."""
-        return get_metrics().snapshot()
+        snap = get_metrics().snapshot()
+        from stratiq.infrastructure.observability.otel import is_otel_enabled
+
+        snap["otel_enabled"] = is_otel_enabled()
+        return snap
+
+    setup_otel(cfg)
+    instrument_fastapi(app)
 
     return app
 

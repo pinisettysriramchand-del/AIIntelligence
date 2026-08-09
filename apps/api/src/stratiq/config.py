@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     chunk_overlap: int = 100
     max_upload_bytes: int = 50 * 1024 * 1024  # 50 MB
 
+    # OpenTelemetry (disabled by default; set OTEL_ENABLED=true)
+    otel_enabled: bool = False
+    otel_service_name: str = "stratiq-api"
+    otel_exporter_otlp_endpoint: str = ""  # e.g. http://localhost:4318
+    otel_traces_sampler_ratio: float = 1.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors(cls, v: Any) -> list[str]:

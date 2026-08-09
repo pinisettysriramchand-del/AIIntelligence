@@ -62,6 +62,12 @@ class MetricsRegistry:
             self._ai_latency.observe(duration_ms)
             if tokens:
                 self._ai_tokens += tokens
+        try:
+            from stratiq.infrastructure.observability.otel import record_ai_otel
+
+            record_ai_otel(duration_ms, tokens)
+        except Exception:
+            pass
 
     def record_processing(self, duration_ms: float, *, failed: bool) -> None:
         with self._lock:
@@ -69,6 +75,12 @@ class MetricsRegistry:
             self._documents_processed += 1
             if failed:
                 self._documents_failed += 1
+        try:
+            from stratiq.infrastructure.observability.otel import record_processing_otel
+
+            record_processing_otel(duration_ms, failed=failed)
+        except Exception:
+            pass
 
     def record_retrieval(self, hit_count: int) -> None:
         with self._lock:
@@ -76,6 +88,12 @@ class MetricsRegistry:
                 self._retrieval_empty += 1
             else:
                 self._retrieval_hits += 1
+        try:
+            from stratiq.infrastructure.observability.otel import record_retrieval_otel
+
+            record_retrieval_otel(hit_count)
+        except Exception:
+            pass
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
