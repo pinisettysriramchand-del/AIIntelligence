@@ -67,6 +67,7 @@ def _doc_from_model(m: DocumentModel) -> Document:
         error_message=m.error_message,
         created_at=m.created_at,
         updated_at=m.updated_at,
+        quality_warnings=list(m.quality_warnings or []),
     )
 
 
@@ -187,6 +188,7 @@ class DocumentRepository:
             storage_path=doc.storage_path,
             status=doc.status.value,
             error_message=doc.error_message,
+            quality_warnings=doc.quality_warnings or [],
             created_at=doc.created_at,
             updated_at=doc.updated_at,
         )
@@ -209,10 +211,13 @@ class DocumentRepository:
         doc_id: uuid.UUID,
         status: DocumentStatus,
         error_message: str | None = None,
+        quality_warnings: list[dict[str, Any]] | None = None,
     ) -> None:
         values: dict[str, Any] = {"status": status.value, "updated_at": datetime.now(UTC)}
         if error_message is not None:
             values["error_message"] = error_message
+        if quality_warnings is not None:
+            values["quality_warnings"] = quality_warnings
         await self._session.execute(update(DocumentModel).where(DocumentModel.id == doc_id).values(**values))
         await self._session.flush()
 

@@ -6,13 +6,19 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
+from stratiq.application.data_quality import detect_kpi_quality_issues
 from stratiq.domain.entities import KPI
 from stratiq.domain.enums import KPIDomain
 
 
 class DashboardService:
-    def __init__(self, kpi_repo: "KPIRepository") -> None:  # noqa: F821
+    def __init__(
+        self,
+        kpi_repo: "KPIRepository",  # noqa: F821
+        doc_repo: "DocumentRepository | None" = None,  # noqa: F821
+    ) -> None:
         self._repo = kpi_repo
+        self._docs = doc_repo
 
     async def get_summary(self, owner_id: uuid.UUID) -> dict[str, Any]:
         kpis = await self._repo.list_by_owner(owner_id)
@@ -58,9 +64,22 @@ class DashboardService:
                 }
             )
 
+        quality_warnings: list[dict[str, Any]] = []
+        if self._docs is not None:
+            docs = await self._docs.list_by_owner(owner_id)
+            for doc in docs:
+                for warning in doc.quality_warnings or []:
+                    item = dict(warning)
+                    item["document_id"] = str(doc.id)
+                    item["document_filename"] = doc.original_filename
+                    quality_warnings.append(item)
+        else:
+            quality_warnings = detect_kpi_quality_issues(kpis)
+
         return {
             "total_kpis": len(kpis),
             "domains": domain_summaries,
+            "data_quality_warnings": quality_warnings,
         }
 
     @staticmethod

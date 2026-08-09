@@ -10,6 +10,7 @@ type DocumentItem = {
   filename: string;
   status: string;
   error_message?: string | null;
+  quality_warnings?: Array<{ code: string; message: string; severity?: string }>;
 };
 
 export default function UploadPage() {
@@ -91,6 +92,11 @@ export default function UploadPage() {
             <div>
               <strong>{item.filename}</strong>
               {item.error_message && <div className="error">{item.error_message}</div>}
+              {(item.quality_warnings || []).slice(0, 3).map((w, idx) => (
+                <div className="error" key={`${item.id}-${w.code}-${idx}`}>
+                  [{w.code}] {w.message}
+                </div>
+              ))}
             </div>
             <div className="muted">{item.status}</div>
           </div>

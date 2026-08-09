@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from stratiq.application.ports import EmbeddingClient, LLMClient, ObjectStorage, VectorStore
+from stratiq.application.data_quality import detect_kpi_quality_issues
 from stratiq.application.kpi_intelligence import enrich_kpis_with_comparisons, normalize_extraction_fields
 from stratiq.domain.enums import DocumentStatus, KPIDomain, TrendDirection
 from stratiq.domain.exceptions import EvidenceRequiredError, ProcessingError
@@ -175,13 +176,34 @@ class ProcessingService:
                 existing = await self._kpis.list_by_owner(doc.owner_id)
                 enrich_kpis_with_comparisons(kpi_entities, existing_kpis=existing)
                 await self._kpis.save_many(kpi_entities)
+                quality_warnings = detect_kpi_quality_issues(
+                    kpi_entities, existing_kpis=existing
+                )
+            else:
+                quality_warnings = [
+                    {
+                        "code": "missing_value",
+                        "message": "No KPIs extracted from document.",
+                        "kpi_name": None,
+                        "severity": "warning",
+                    }
+                ]
 
-            await self._docs.update_status(document_id, DocumentStatus.ready)
+            await self._docs.update_status(
+                document_id,
+                DocumentStatus.ready,
+                quality_warnings=quality_warnings,
+            )
             await self._audit.log_document_processed(doc.owner_id, document_id, len(kpi_entities))
             get_metrics().record_processing(timer.ms(), failed=False)
             logger.info(
                 "Document processed successfully",
-                extra={"doc_id": str(document_id), "chunks": len(chunk_entities), "kpis": len(kpi_entities)},
+                extra={
+                    "doc_id": str(document_id),
+                    "chunks": len(chunk_entities),
+                    "kpis": len(kpi_entities),
+                    "quality_warnings": len(quality_warnings),
+                },
             )
 
         except Exception as exc:

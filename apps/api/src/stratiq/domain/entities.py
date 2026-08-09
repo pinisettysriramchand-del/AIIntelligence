@@ -34,6 +34,7 @@ class Document:
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    quality_warnings: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

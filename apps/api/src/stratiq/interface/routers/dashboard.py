@@ -27,4 +27,5 @@ async def get_dashboard(
             )
             for d in summary["domains"]
         ],
+        data_quality_warnings=summary.get("data_quality_warnings") or [],
     )

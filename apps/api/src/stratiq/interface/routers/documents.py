@@ -124,4 +124,5 @@ def _doc_response(doc: object) -> DocumentResponse:
         error_message=doc.error_message,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
+        quality_warnings=doc.quality_warnings or [],
     )

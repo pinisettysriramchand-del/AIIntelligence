@@ -5,7 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from stratiq.domain.enums import DocumentStatus
 
@@ -21,6 +23,7 @@ class DocumentResponse(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    quality_warnings: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

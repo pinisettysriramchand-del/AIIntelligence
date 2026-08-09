@@ -28,6 +28,14 @@ type DashboardApi = {
       } | null;
     }>;
   }>;
+  data_quality_warnings?: Array<{
+    code: string;
+    message: string;
+    kpi_name?: string | null;
+    severity?: string;
+    document_id?: string;
+    document_filename?: string;
+  }>;
 };
 
 type DocumentRow = {
@@ -65,6 +73,13 @@ type DashboardView = {
   executive_summary?: string | null;
   timeline: Executive["timeline"];
   decision_cards: DecisionCard[];
+  data_quality_warnings: Array<{
+    code: string;
+    message: string;
+    kpi_name?: string | null;
+    severity?: string;
+    document_filename?: string;
+  }>;
   kpis: Array<{
     id: string;
     name: string;
@@ -116,6 +131,7 @@ export default function DashboardPage() {
       executive_summary: executive?.summary ?? null,
       timeline: executive?.timeline ?? [],
       decision_cards: cards,
+      data_quality_warnings: dashboard.data_quality_warnings || [],
       kpis,
     });
   }
@@ -174,6 +190,22 @@ export default function DashboardPage() {
               <span className="muted">Ready Documents</span>
               <strong>{data.summary.ready_documents}</strong>
             </div>
+          </section>
+
+          <section className="panel">
+            <h2>Data Quality</h2>
+            {data.data_quality_warnings.length === 0 && (
+              <p className="muted">No data-quality warnings.</p>
+            )}
+            {data.data_quality_warnings.map((w, index) => (
+              <p
+                key={`${w.code}-${w.kpi_name || ""}-${index}`}
+                className={w.severity === "info" ? "muted" : "error"}
+              >
+                [{w.code}] {w.message}
+                {w.document_filename ? ` (${w.document_filename})` : ""}
+              </p>
+            ))}
           </section>
 
           <section className="panel">

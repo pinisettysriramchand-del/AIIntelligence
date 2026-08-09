@@ -40,6 +40,17 @@ class EvidenceMode(str, Enum):
     insufficient = "insufficient"
 
 
+class DataQualityCode(str, Enum):
+    missing_value = "missing_value"
+    missing_period = "missing_period"
+    missing_unit = "missing_unit"
+    duplicate_record = "duplicate_record"
+    inconsistent_units = "inconsistent_units"
+    invalid_period = "invalid_period"
+    conflicting_values = "conflicting_values"
+    insufficient_history = "insufficient_history"
+
+
 class AuditEventType(str, Enum):
     user_registered = "user_registered"
     user_login = "user_login"

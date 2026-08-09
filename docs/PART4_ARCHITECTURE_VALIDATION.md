@@ -1,6 +1,6 @@
 # Part 4 Architecture Validation — Enterprise Hardening
 
-**Status:** Stage 4A+4B COMPLETE — AWAITING APPROVAL for next stage  
+**Status:** Stage 4A+4B+4C COMPLETE — AWAITING APPROVAL for next stage  
 **Date:** 2026-08-09  
 **Sources:** `docs/source/part4/` (01–03, 05–07)  
 **Baseline:** Part 3 ACCEPTED · portable Postgres + Alembic verified  
@@ -10,6 +10,16 @@
 ## Stage 4A result
 
 **DONE.** Alembic `002_decision_intelligence` + live upgrade/downgrade verified.
+
+## Stage 4C result
+
+**DONE.** Data-quality warnings detected, persisted on documents, surfaced on dashboard/upload UI.
+
+| Item | Detail |
+|------|--------|
+| Migration | `004_data_quality` |
+| Detector | `application/data_quality.py` |
+| API | Document `quality_warnings`; Dashboard `data_quality_warnings` |
 
 ## Stage 4B result
 
@@ -36,7 +46,7 @@
 |---|-------------|---------|-------|
 | 1 | KPI Intelligence (§24) | CONDITIONAL PASS | Fields + deterministic compare; definition/observation split still deferred |
 | 2 | Decision Cards (§25) | CONDITIONAL PASS | Missing topic / expected outcome (4D) |
-| 3 | Data quality (§26) | FAIL | Stage 4C |
+| 3 | Data quality (§26) | CONDITIONAL PASS | Detector + API/UI; raw tabular DQ scan deferred |
 | 4 | Traceability (§27) | FAIL | Stage 4J |
 | 5 | Enterprise data (§18) | PARTIAL | DI tables migrated; orgs/jobs deferred |
 | 6 | Reliability (§20) | FAIL | Stage 4E |
@@ -50,11 +60,10 @@
 
 ## Approval gate (next)
 
-1. **Approve Stage 4C** — data-quality warnings (**recommended**)
-2. **Approve Stage 4B+4C** (4B already done)
-3. **Approve Stage 4D** — Decision Card topic/expected_outcome
-4. **Request git commit** of 4B
-5. **Overrides**
+1. **Approve Stage 4D** — Decision Card topic/expected_outcome (**recommended**)
+2. **Approve Stage 4E** — reliability (jobs/idempotency/DLQ)
+3. **Request git commit** of 4C
+4. **Overrides**
 
 ---
 

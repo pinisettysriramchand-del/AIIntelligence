@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DomainSummary(BaseModel):
@@ -16,3 +16,4 @@ class DomainSummary(BaseModel):
 class DashboardResponse(BaseModel):
     total_kpis: int
     domains: list[DomainSummary]
+    data_quality_warnings: list[dict[str, Any]] = Field(default_factory=list)

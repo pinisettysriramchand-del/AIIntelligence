@@ -184,8 +184,9 @@ def get_kpi_service(
 
 def get_dashboard_service(
     kpi_repo: KPIRepository = Depends(get_kpi_repo),
+    doc_repo: DocumentRepository = Depends(get_doc_repo),
 ) -> DashboardService:
-    return DashboardService(kpi_repo)
+    return DashboardService(kpi_repo, doc_repo)
 
 
 def get_chat_service(
