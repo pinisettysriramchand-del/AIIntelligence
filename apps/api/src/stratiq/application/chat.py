@@ -10,7 +10,7 @@ from typing import Any
 from stratiq.application.ports import EmbeddingClient, LLMClient, VectorStore
 from stratiq.domain.entities import ChatMessage, ChatSession, Citation
 from stratiq.domain.exceptions import AuthorizationError, NotFoundError
-from stratiq.infrastructure.ai.prompts import SYSTEM_ASSISTANT
+from stratiq.infrastructure.ai.prompt_registry import get_prompt
 from stratiq.infrastructure.observability import get_metrics
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ _INSUFFICIENT_EVIDENCE_REPLY = (
     "Upload relevant business documents or rephrase using terms found in your sources."
 )
 
-_RAG_SYSTEM_PROMPT = SYSTEM_ASSISTANT + "\n\nContext chunks:\n{context}"
+_RAG_PROMPT = get_prompt("rag.chat")
 
 
 class ChatService:
@@ -134,7 +134,7 @@ class ChatService:
             messages: list[dict[str, str]] = [
                 {
                     "role": "system",
-                    "content": _RAG_SYSTEM_PROMPT.format(context="\n\n".join(context_parts)),
+                    "content": _RAG_PROMPT.render_system(context="\n\n".join(context_parts)),
                 }
             ]
             for hist_msg in history[-10:]:

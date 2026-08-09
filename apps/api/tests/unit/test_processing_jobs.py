@@ -89,6 +89,8 @@ async def test_enqueue_reuses_active_job():
     assert len(queue.calls) == 1
     assert queue.calls[0]["function"] == "process_document"
     assert queue.calls[0]["processing_job_id"] == str(first.id)
+    assert queue.calls[0]["correlation_id"]
+    assert first.correlation_id == queue.calls[0]["correlation_id"]
 
 
 def test_retry_policy_boundaries():

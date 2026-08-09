@@ -179,6 +179,7 @@ def _job_response(job: ProcessingJob) -> ProcessingJobResponse:
         idempotency_key=job.idempotency_key,
         arq_job_id=job.arq_job_id,
         error_message=job.error_message,
+        correlation_id=job.correlation_id,
         created_at=job.created_at,
         updated_at=job.updated_at,
         started_at=job.started_at,

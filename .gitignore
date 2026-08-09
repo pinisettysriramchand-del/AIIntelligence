@@ -12,3 +12,6 @@ wheels/
 # Local tool caches (portable Postgres, downloads)
 .tools/
 .env
+
+# Local DR dumps (never commit)
+backups/

@@ -11,6 +11,8 @@ import httpx
 
 from stratiq.domain.exceptions import ProcessingError
 from stratiq.infrastructure.observability import Timer, get_metrics
+from stratiq.infrastructure.observability.correlation import apply_to_current_span, correlation_attrs
+from stratiq.infrastructure.observability.otel import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -46,26 +48,40 @@ class OpenAILLMClient:
             "max_tokens": max_tokens,
         }
         timer = Timer()
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            try:
-                response = await client.post(
-                    f"{self._base_url}/chat/completions",
-                    headers=self._headers,
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-                usage = data.get("usage") or {}
-                tokens = usage.get("total_tokens")
-                get_metrics().record_ai_call(timer.ms(), tokens if isinstance(tokens, int) else None)
-                return data["choices"][0]["message"]["content"]
-            except httpx.HTTPStatusError as exc:
-                get_metrics().record_ai_call(timer.ms())
-                logger.error("LLM HTTP error: %s", exc.response.text)
-                raise ProcessingError(f"LLM request failed: {exc.response.status_code}") from exc
-            except (KeyError, IndexError, json.JSONDecodeError) as exc:
-                get_metrics().record_ai_call(timer.ms())
-                raise ProcessingError(f"LLM response parsing failed: {exc}") from exc
+        tracer = get_tracer()
+        with tracer.start_as_current_span("stratiq.ai.chat_completion") as span:
+            for key, value in correlation_attrs().items():
+                span.set_attribute(key, value)
+            span.set_attribute("stratiq.ai.model", self._model)
+            apply_to_current_span()
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                try:
+                    response = await client.post(
+                        f"{self._base_url}/chat/completions",
+                        headers=self._headers,
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    usage = data.get("usage") or {}
+                    tokens = usage.get("total_tokens")
+                    if isinstance(tokens, int):
+                        span.set_attribute("stratiq.ai.tokens", tokens)
+                    get_metrics().record_ai_call(timer.ms(), tokens if isinstance(tokens, int) else None)
+                    return data["choices"][0]["message"]["content"]
+                except httpx.HTTPStatusError as exc:
+                    get_metrics().record_ai_call(timer.ms())
+                    span.set_attribute("stratiq.ai.error", True)
+                    logger.error(
+                        "LLM HTTP error: %s",
+                        exc.response.text,
+                        extra=correlation_attrs(),
+                    )
+                    raise ProcessingError(f"LLM request failed: {exc.response.status_code}") from exc
+                except (KeyError, IndexError, json.JSONDecodeError) as exc:
+                    get_metrics().record_ai_call(timer.ms())
+                    span.set_attribute("stratiq.ai.error", True)
+                    raise ProcessingError(f"LLM response parsing failed: {exc}") from exc
 
     async def json_completion(
         self,

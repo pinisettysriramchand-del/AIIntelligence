@@ -123,32 +123,41 @@ def instrument_fastapi(app: "FastAPI") -> None:
 def record_ai_otel(duration_ms: float, tokens: int | None = None) -> None:
     if not _INITIALIZED:
         return
+    from stratiq.infrastructure.observability.correlation import correlation_attrs
+
+    attrs = correlation_attrs()
     assert _ai_latency_hist is not None
-    _ai_latency_hist.record(duration_ms)
+    _ai_latency_hist.record(duration_ms, attributes=attrs or None)
     if tokens and _ai_tokens_counter is not None:
-        _ai_tokens_counter.add(tokens)
+        _ai_tokens_counter.add(tokens, attributes=attrs or None)
 
 
 def record_processing_otel(duration_ms: float, *, failed: bool) -> None:
     if not _INITIALIZED:
         return
+    from stratiq.infrastructure.observability.correlation import correlation_attrs
+
+    attrs = correlation_attrs()
     assert _processing_latency_hist is not None
-    _processing_latency_hist.record(duration_ms)
+    _processing_latency_hist.record(duration_ms, attributes=attrs or None)
     assert _documents_processed_counter is not None
-    _documents_processed_counter.add(1)
+    _documents_processed_counter.add(1, attributes=attrs or None)
     if failed and _documents_failed_counter is not None:
-        _documents_failed_counter.add(1)
+        _documents_failed_counter.add(1, attributes=attrs or None)
 
 
 def record_retrieval_otel(hit_count: int) -> None:
     if not _INITIALIZED:
         return
+    from stratiq.infrastructure.observability.correlation import correlation_attrs
+
+    attrs = correlation_attrs()
     if hit_count <= 0:
         assert _retrieval_empty_counter is not None
-        _retrieval_empty_counter.add(1)
+        _retrieval_empty_counter.add(1, attributes=attrs or None)
     else:
         assert _retrieval_hits_counter is not None
-        _retrieval_hits_counter.add(1)
+        _retrieval_hits_counter.add(1, attributes=attrs or None)
 
 
 def is_otel_enabled() -> bool:

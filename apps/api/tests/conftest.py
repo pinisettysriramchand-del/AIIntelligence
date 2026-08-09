@@ -242,8 +242,17 @@ async def app(test_settings: Settings, db_engine, fake_redis: FakeRedis) -> Fast
 
     from fastapi import FastAPI as _FastAPI
     from fastapi.middleware.cors import CORSMiddleware
-    from stratiq.interface.app_factory import _register_exception_handlers
-    from stratiq.interface.routers import auth, chat, dashboard, decisions, documents, kpis, reports
+    from stratiq.interface.app_factory import CorrelationIdMiddleware, _register_exception_handlers
+    from stratiq.interface.routers import (
+        ai_governance,
+        auth,
+        chat,
+        dashboard,
+        decisions,
+        documents,
+        kpis,
+        reports,
+    )
 
     _app = _FastAPI(title="StratIQ Test", lifespan=_noop_lifespan)
     _app.add_middleware(
@@ -252,7 +261,9 @@ async def app(test_settings: Settings, db_engine, fake_redis: FakeRedis) -> Fast
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
+    _app.add_middleware(CorrelationIdMiddleware)
     _register_exception_handlers(_app)
     _app.include_router(auth.router, prefix="/api/v1")
     _app.include_router(documents.router, prefix="/api/v1")
@@ -261,6 +272,7 @@ async def app(test_settings: Settings, db_engine, fake_redis: FakeRedis) -> Fast
     _app.include_router(chat.router, prefix="/api/v1")
     _app.include_router(decisions.router, prefix="/api/v1")
     _app.include_router(reports.router, prefix="/api/v1")
+    _app.include_router(ai_governance.router, prefix="/api/v1")
 
     @_app.get("/health")
     async def health() -> dict:

@@ -153,6 +153,7 @@ class TestDocumentProcess:
         assert body["status"] == "queued"
         assert body["max_attempts"] >= 1
         assert "process:" in body["idempotency_key"]
+        assert body.get("correlation_id")
 
         again = await client.post(f"/api/v1/documents/{doc_id}/process", headers=headers)
         assert again.status_code == 200
@@ -161,6 +162,25 @@ class TestDocumentProcess:
         jobs = await client.get(f"/api/v1/documents/{doc_id}/jobs", headers=headers)
         assert jobs.status_code == 200
         assert jobs.json()["total"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_process_propagates_request_correlation_id(self, auth_client):
+        client, headers = auth_client
+        csv_data = b"metric,value\nrevenue,1000"
+        upload = await client.post(
+            "/api/v1/documents",
+            headers=headers,
+            files={"file": ("kpis.csv", csv_data, "text/csv")},
+        )
+        doc_id = upload.json()["id"]
+        req_headers = {**headers, "X-Request-ID": "client-corr-42"}
+        response = await client.post(
+            f"/api/v1/documents/{doc_id}/process",
+            headers=req_headers,
+        )
+        assert response.status_code == 200
+        assert response.headers.get("X-Request-ID") == "client-corr-42"
+        assert response.json()["correlation_id"] == "client-corr-42"
 
     @pytest.mark.asyncio
     async def test_process_nonexistent_returns_404(self, auth_client):

@@ -16,13 +16,13 @@ def test_orm_registers_di_tables():
     assert "processing_jobs" in Base.metadata.tables
 
 
-def test_alembic_head_is_006_processing_jobs():
+def test_alembic_head_is_007_correlation_ids():
     api_root = Path(__file__).resolve().parents[2]
     cfg = Config(str(api_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(api_root / "alembic"))
     scripts = ScriptDirectory.from_config(cfg)
     heads = scripts.get_heads()
-    assert heads == ["006_processing_jobs"]
+    assert heads == ["007_correlation_ids"]
 
 
 def test_migration_002_upgrade_sql_contains_di_tables():

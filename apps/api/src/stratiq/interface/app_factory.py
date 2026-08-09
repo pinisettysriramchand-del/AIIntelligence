@@ -25,11 +25,41 @@ from stratiq.domain.exceptions import (
 )
 from stratiq.infrastructure.db.session import close_db, init_db
 from stratiq.infrastructure.observability import get_metrics
+from stratiq.infrastructure.observability.correlation import (
+    REQUEST_ID_HEADER,
+    apply_to_current_span,
+    install_log_filter,
+    reset_correlation_id,
+    resolve_incoming_request_id,
+    set_correlation_id,
+)
 from stratiq.infrastructure.observability.otel import instrument_fastapi, setup_otel
 from stratiq.infrastructure.redis_client import close_redis, init_redis
-from stratiq.interface.routers import auth, chat, dashboard, decisions, documents, kpis, reports
+from stratiq.interface.routers import (
+    ai_governance,
+    auth,
+    chat,
+    dashboard,
+    decisions,
+    documents,
+    kpis,
+    reports,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        correlation_id = resolve_incoming_request_id(request.headers)
+        token = set_correlation_id(correlation_id)
+        try:
+            apply_to_current_span()
+            response = await call_next(request)
+            response.headers[REQUEST_ID_HEADER] = correlation_id
+            return response
+        finally:
+            reset_correlation_id(token)
 
 
 class RequestMetricsMiddleware(BaseHTTPMiddleware):
@@ -90,8 +120,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[REQUEST_ID_HEADER],
     )
     app.add_middleware(RequestMetricsMiddleware)
+    app.add_middleware(CorrelationIdMiddleware)
 
     _register_exception_handlers(app)
 
@@ -102,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(decisions.router, prefix="/api/v1")
     app.include_router(reports.router, prefix="/api/v1")
+    app.include_router(ai_governance.router, prefix="/api/v1")
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:
@@ -116,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         snap["otel_enabled"] = is_otel_enabled()
         return snap
 
+    install_log_filter()
     setup_otel(cfg)
     instrument_fastapi(app)
 

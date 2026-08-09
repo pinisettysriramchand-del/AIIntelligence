@@ -336,6 +336,7 @@ def _job_from_model(m: ProcessingJobModel) -> ProcessingJob:
         updated_at=m.updated_at,
         started_at=m.started_at,
         finished_at=m.finished_at,
+        correlation_id=m.correlation_id,
     )
 
 
@@ -358,6 +359,7 @@ class ProcessingJobRepository:
             updated_at=job.updated_at,
             started_at=job.started_at,
             finished_at=job.finished_at,
+            correlation_id=job.correlation_id,
         )
         self._session.add(model)
         await self._session.flush()
@@ -419,6 +421,7 @@ class ProcessingJobRepository:
         clear_error: bool = False,
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
+        correlation_id: str | None = None,
     ) -> None:
         values: dict[str, Any] = {"updated_at": datetime.now(UTC)}
         if status is not None:
@@ -435,6 +438,8 @@ class ProcessingJobRepository:
             values["started_at"] = started_at
         if finished_at is not None:
             values["finished_at"] = finished_at
+        if correlation_id is not None:
+            values["correlation_id"] = correlation_id
         await self._session.execute(
             update(ProcessingJobModel).where(ProcessingJobModel.id == job_id).values(**values)
         )

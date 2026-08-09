@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppNav } from "@/components/AppNav";
+import { SparkLine } from "@/components/charts/SparkLine";
 import { api, getTokens } from "@/lib/api";
+import { trendPoints } from "@/lib/charts";
 
 type DecisionCard = {
   id: string;
@@ -50,6 +52,17 @@ export default function DecisionCardPage() {
       .finally(() => setLoading(false));
   }, [params.id, router]);
 
+  const forecastChart = useMemo(() => {
+    if (!card) return null;
+    return trendPoints({
+      name: card.kpi_name,
+      current: card.current_value,
+      period: card.period,
+      forecast: card.forecast_value,
+      forecastHorizon: card.forecast_horizon,
+    });
+  }, [card]);
+
   return (
     <main>
       <AppNav />
@@ -58,6 +71,7 @@ export default function DecisionCardPage() {
       {!loading && !error && !card && <p className="muted">Decision card not found.</p>}
       {card && (
         <>
+          <p className="layer-eyebrow">Level 3 — Action</p>
           <h1 className="hero-title">{card.topic || card.kpi_name}</h1>
           <p className="lead">{card.kpi_signal || `${card.kpi_name}: ${card.current_value}`}</p>
           {card.evidence_mode === "insufficient" && (
@@ -81,7 +95,9 @@ export default function DecisionCardPage() {
               <strong>{card.evidence_mode}</strong>
             </div>
           </section>
-          <section className="panel">
+
+          <section className="panel layer-panel">
+            <p className="layer-eyebrow">Level 2 — Explanation</p>
             <h2>What happened</h2>
             <p>{card.what_happened}</p>
             <h2>Why it happened</h2>
@@ -100,12 +116,17 @@ export default function DecisionCardPage() {
                 <li key={item}>{item}</li>
               ))}
             </ul>
-            <h2>Recommendation</h2>
-            <p>{card.recommendation}</p>
-            <h2>Expected outcome</h2>
-            <p>{card.expected_outcome || "Outcome not specified from evidence."}</p>
             <h2>Forecast</h2>
-            {card.forecast_value ? (
+            {forecastChart ? (
+              <>
+                <SparkLine
+                  points={forecastChart.points}
+                  forecastFromIndex={forecastChart.forecastFromIndex}
+                  ariaLabel={`${card.kpi_name} forecast`}
+                />
+                <p className="muted">{card.forecast_explanation}</p>
+              </>
+            ) : card.forecast_value ? (
               <>
                 <p>
                   {card.forecast_value} ({card.forecast_horizon || "n/a"})
@@ -120,6 +141,14 @@ export default function DecisionCardPage() {
             )}
             <h2>Evidence</h2>
             <p className="muted">{card.evidence_chunk_ids.join(", ") || "None"}</p>
+          </section>
+
+          <section className="panel layer-panel">
+            <p className="layer-eyebrow">Level 3 — Next step</p>
+            <h2>Recommendation</h2>
+            <p>{card.recommendation}</p>
+            <h2>Expected outcome</h2>
+            <p>{card.expected_outcome || "Outcome not specified from evidence."}</p>
           </section>
         </>
       )}

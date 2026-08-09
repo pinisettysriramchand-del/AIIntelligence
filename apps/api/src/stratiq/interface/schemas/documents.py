@@ -43,6 +43,7 @@ class ProcessingJobResponse(BaseModel):
     idempotency_key: str
     arq_job_id: str | None = None
     error_message: str | None = None
+    correlation_id: str | None = None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None

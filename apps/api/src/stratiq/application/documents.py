@@ -11,6 +11,7 @@ from stratiq.config import get_settings
 from stratiq.domain.entities import Document, ProcessingJob
 from stratiq.domain.enums import DocumentStatus, ProcessingJobStatus
 from stratiq.domain.exceptions import AuthorizationError, NotFoundError
+from stratiq.infrastructure.observability.correlation import ensure_correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class DocumentService:
         now = datetime.now(UTC)
         job_id = uuid.uuid4()
         idempotency_key = f"process:{doc_id}:{job_id}"
+        correlation_id = ensure_correlation_id()
         job = ProcessingJob(
             id=job_id,
             document_id=doc_id,
@@ -91,6 +93,7 @@ class DocumentService:
             error_message=None,
             created_at=now,
             updated_at=now,
+            correlation_id=correlation_id,
         )
         if self._jobs is not None:
             await self._jobs.save(job)
@@ -100,6 +103,7 @@ class DocumentService:
             "process_document",
             document_id=str(doc_id),
             processing_job_id=str(job_id),
+            correlation_id=correlation_id,
             _job_id=idempotency_key,
         )
         if self._jobs is not None:
@@ -108,7 +112,12 @@ class DocumentService:
 
         logger.info(
             "Document queued for processing",
-            extra={"doc_id": str(doc_id), "job_id": str(job_id), "arq_job_id": arq_job_id},
+            extra={
+                "doc_id": str(doc_id),
+                "job_id": str(job_id),
+                "arq_job_id": arq_job_id,
+                "correlation_id": correlation_id,
+            },
         )
         return job
 

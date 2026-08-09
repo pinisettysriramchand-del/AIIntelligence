@@ -12,9 +12,11 @@ from stratiq.application.ports import LLMClient
 from stratiq.domain.entities import DecisionCard, ExecutiveReport, KPI
 from stratiq.domain.enums import DocumentStatus, EvidenceMode, HealthLabel, TrendDirection
 from stratiq.domain.exceptions import NotFoundError, ValidationError
-from stratiq.infrastructure.ai import prompts
+from stratiq.infrastructure.ai.prompt_registry import decision_intelligence_user, get_prompt
 
 logger = logging.getLogger(__name__)
+
+_DI_PROMPT = get_prompt("di.decision_cards")
 
 
 def _normalize_trend(value: str | None) -> TrendDirection:
@@ -93,8 +95,8 @@ class DecisionIntelligenceService:
         evidence_map = await self._evidence_for_kpis(kpi_list)
         payload = await self._llm.json_completion(
             messages=[
-                {"role": "system", "content": prompts.DECISION_INTELLIGENCE_SYSTEM},
-                {"role": "user", "content": prompts.decision_intelligence_user(kpi_list, evidence_map)},
+                {"role": "system", "content": _DI_PROMPT.render_system()},
+                {"role": "user", "content": decision_intelligence_user(kpi_list, evidence_map)},
             ],
             temperature=0.1,
             max_tokens=3000,

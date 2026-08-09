@@ -12,33 +12,13 @@ from stratiq.application.data_quality import detect_kpi_quality_issues
 from stratiq.application.kpi_intelligence import enrich_kpis_with_comparisons, normalize_extraction_fields
 from stratiq.domain.enums import DocumentStatus, KPIDomain, TrendDirection
 from stratiq.domain.exceptions import EvidenceRequiredError, ProcessingError
+from stratiq.infrastructure.ai.prompt_registry import get_prompt
 from stratiq.infrastructure.observability import Timer, get_metrics
 
 logger = logging.getLogger(__name__)
 
-_DOMAIN_DETECT_PROMPT = """You are a domain classifier. Given the following document text (first 2000 chars), 
-identify which strategic domains are present. Return a JSON object with key "domains" containing a list of 
-domain strings from: financial, operational, strategic, risk, hr, marketing, technology, other.
-Example: {"domains": ["financial", "operational"]}
-Document text:
-{text}"""
-
-_KPI_EXTRACT_PROMPT = """You are a KPI extraction specialist. Given the following document chunks, 
-extract all measurable KPIs. For each KPI return:
-- name: descriptive KPI name
-- business_meaning: one-sentence business meaning
-- value: numeric or textual value  
-- unit: unit of measurement (optional)
-- period: time period (optional)
-- domain: one of financial/operational/strategic/risk/hr/marketing/technology/other
-- confidence: number 0-1 for extraction confidence
-- dimensions: object of related dimensions (optional), e.g. {{"region": "EMEA"}}
-- evidence_chunk_ids: list of chunk IDs (strings) that contain evidence for this KPI
-
-Return JSON: {{"kpis": [{{"name": ..., "business_meaning": ..., "value": ..., "unit": ..., "period": ..., "domain": ..., "confidence": ..., "dimensions": {{}}, "evidence_chunk_ids": [...]}}]}}
-
-Chunks (id: content):
-{chunks}"""
+_DOMAIN_PROMPT = get_prompt("kpi.domain_detect")
+_KPI_PROMPT = get_prompt("kpi.extract")
 
 
 class ProcessingService:
@@ -137,7 +117,10 @@ class ProcessingService:
             preview_text = markdown_text[:2000]
             domain_result = await self._llm.json_completion(
                 messages=[
-                    {"role": "user", "content": _DOMAIN_DETECT_PROMPT.format(text=preview_text)}
+                    {
+                        "role": "user",
+                        "content": _DOMAIN_PROMPT.render_user(text=preview_text),
+                    }
                 ],
                 temperature=0.0,
                 max_tokens=256,
@@ -148,7 +131,10 @@ class ProcessingService:
             chunks_text = "\n".join(f"{c.id}: {c.content[:300]}" for c in chunk_entities[:40])
             kpi_result = await self._llm.json_completion(
                 messages=[
-                    {"role": "user", "content": _KPI_EXTRACT_PROMPT.format(chunks=chunks_text)}
+                    {
+                        "role": "user",
+                        "content": _KPI_PROMPT.render_user(chunks=chunks_text),
+                    }
                 ],
                 temperature=0.0,
                 max_tokens=2048,

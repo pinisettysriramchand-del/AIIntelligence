@@ -60,6 +60,7 @@ class ProcessingJob:
     updated_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    correlation_id: str | None = None
 
 
 @dataclass

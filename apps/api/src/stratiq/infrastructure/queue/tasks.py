@@ -71,6 +71,7 @@ async def process_document(
     ctx: dict[str, Any],
     document_id: str,
     processing_job_id: str | None = None,
+    correlation_id: str | None = None,
 ) -> None:
     """ARQ worker task: run the document processing pipeline with retries + DLQ."""
     from stratiq.application.audit import AuditService
@@ -89,6 +90,8 @@ async def process_document(
         ProcessingJobRepository,
     )
     from stratiq.infrastructure.db.session import get_session_factory
+    from stratiq.infrastructure.observability.correlation import bind_correlation
+    from stratiq.infrastructure.observability.otel import get_tracer
     from stratiq.infrastructure.parsers.factory import ParserFactory
     from stratiq.infrastructure.storage.local import LocalFileStorage
     from stratiq.infrastructure.vector.qdrant_store import QdrantVectorStore
@@ -100,6 +103,59 @@ async def process_document(
     job_uuid = uuid.UUID(processing_job_id) if processing_job_id else None
     session_factory = get_session_factory()
     now = datetime.now(UTC)
+    resolved_correlation = correlation_id or (str(job_uuid) if job_uuid else str(uuid.uuid4()))
+
+    with bind_correlation(correlation_id=resolved_correlation, job_id=processing_job_id):
+        tracer = get_tracer()
+        with tracer.start_as_current_span("stratiq.process_document") as span:
+            span.set_attribute("stratiq.document_id", document_id)
+            span.set_attribute("stratiq.job_try", job_try)
+            await _run_process_document(
+                ctx=ctx,
+                document_id=document_id,
+                processing_job_id=processing_job_id,
+                job_uuid=job_uuid,
+                job_try=job_try,
+                max_attempts=max_attempts,
+                defer_seconds=defer_seconds,
+                session_factory=session_factory,
+                settings=settings,
+                now=now,
+                correlation_id=resolved_correlation,
+            )
+
+
+async def _run_process_document(
+    *,
+    ctx: dict[str, Any],
+    document_id: str,
+    processing_job_id: str | None,
+    job_uuid: uuid.UUID | None,
+    job_try: int,
+    max_attempts: int,
+    defer_seconds: int,
+    session_factory: Any,
+    settings: Any,
+    now: datetime,
+    correlation_id: str,
+) -> None:
+    from stratiq.application.audit import AuditService
+    from stratiq.application.processing import ProcessingService
+    from stratiq.domain.enums import ProcessingJobStatus
+    from stratiq.domain.exceptions import ProcessingError
+    from stratiq.infrastructure.ai.embeddings import OpenAIEmbeddingClient
+    from stratiq.infrastructure.ai.llm import OpenAILLMClient
+    from stratiq.infrastructure.chunking.semantic import SemanticChunker
+    from stratiq.infrastructure.db.repositories import (
+        AuditRepository,
+        ChunkRepository,
+        DocumentRepository,
+        KPIRepository,
+        ProcessingJobRepository,
+    )
+    from stratiq.infrastructure.parsers.factory import ParserFactory
+    from stratiq.infrastructure.storage.local import LocalFileStorage
+    from stratiq.infrastructure.vector.qdrant_store import QdrantVectorStore
 
     async with session_factory() as db_session:
         jobs = ProcessingJobRepository(db_session)
@@ -110,6 +166,7 @@ async def process_document(
                 attempt=job_try,
                 started_at=now if job_try == 1 else None,
                 clear_error=True,
+                correlation_id=correlation_id,
             )
             await db_session.commit()
 
@@ -164,6 +221,7 @@ async def process_document(
                             "job_id": processing_job_id,
                             "attempt": job_try,
                             "max_attempts": max_attempts,
+                            "correlation_id": correlation_id,
                         },
                     )
                     raise Retry(defer=job_try * defer_seconds) from exc
@@ -183,6 +241,7 @@ async def process_document(
                     {
                         "document_id": document_id,
                         "processing_job_id": processing_job_id,
+                        "correlation_id": correlation_id,
                         "attempt": job_try,
                         "max_attempts": max_attempts,
                         "error": error_text,
@@ -195,6 +254,7 @@ async def process_document(
                         "doc_id": document_id,
                         "job_id": processing_job_id,
                         "attempt": job_try,
+                        "correlation_id": correlation_id,
                     },
                 )
             raise ProcessingError(error_text) from exc
