@@ -27,7 +27,12 @@ uv run alembic heads                             → 002_decision_intelligence (
 uv run alembic history                           → 001_initial → 002_decision_intelligence
 ```
 
-Live `alembic upgrade head` against localhost Postgres: **not run** — connection refused (Postgres not up). Compose migrate path will apply 002 when DB is available.
+Live `alembic upgrade head` against localhost Postgres: **verified** via portable Postgres (Docker blocked by missing WSL2). See `docs/POSTGRES_LIVE_UPGRADE_FIX.md`.
+
+Evidence:
+- upgrade `-> 001_initial -> 002_decision_intelligence`
+- downgrade `002 -> 001_initial`
+- re-upgrade to `002_decision_intelligence (head)`
 
 ## Known limitations
 - Live upgrade/downgrade against Postgres not verified in this session
