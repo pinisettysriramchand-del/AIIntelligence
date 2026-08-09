@@ -10,16 +10,16 @@ from typing import Any
 from stratiq.application.ports import EmbeddingClient, LLMClient, VectorStore
 from stratiq.domain.entities import ChatMessage, ChatSession, Citation
 from stratiq.domain.exceptions import AuthorizationError, NotFoundError
+from stratiq.infrastructure.ai.prompts import SYSTEM_ASSISTANT
 
 logger = logging.getLogger(__name__)
 
-_RAG_SYSTEM_PROMPT = """You are StratIQ, an AI strategic intelligence assistant. 
-Answer the user's question using ONLY the provided context chunks. 
-Be concise, accurate, and cite your sources using [chunk_id] notation.
-If you cannot answer from the context, say so clearly.
+_INSUFFICIENT_EVIDENCE_REPLY = (
+    "Insufficient evidence in uploaded documents to answer this question. "
+    "Upload relevant business documents or rephrase using terms found in your sources."
+)
 
-Context chunks:
-{context}"""
+_RAG_SYSTEM_PROMPT = SYSTEM_ASSISTANT + "\n\nContext chunks:\n{context}"
 
 
 class ChatService:
@@ -124,21 +124,25 @@ class ChatService:
             except (ValueError, KeyError):
                 continue
 
-        history = await self._messages.list_by_session(session_id)
-        messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": _RAG_SYSTEM_PROMPT.format(context="\n\n".join(context_parts)),
-            }
-        ]
-        for hist_msg in history[-10:]:
-            messages.append({"role": hist_msg.role, "content": hist_msg.content})
+        if not context_parts:
+            assistant_text = _INSUFFICIENT_EVIDENCE_REPLY
+            citations = []
+        else:
+            history = await self._messages.list_by_session(session_id)
+            messages: list[dict[str, str]] = [
+                {
+                    "role": "system",
+                    "content": _RAG_SYSTEM_PROMPT.format(context="\n\n".join(context_parts)),
+                }
+            ]
+            for hist_msg in history[-10:]:
+                messages.append({"role": hist_msg.role, "content": hist_msg.content})
 
-        assistant_text = await self._llm.chat_completion(
-            messages=messages,
-            temperature=0.2,
-            max_tokens=1024,
-        )
+            assistant_text = await self._llm.chat_completion(
+                messages=messages,
+                temperature=0.2,
+                max_tokens=1024,
+            )
 
         assistant_msg = ChatMessage(
             id=uuid.uuid4(),

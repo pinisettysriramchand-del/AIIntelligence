@@ -87,6 +87,7 @@ def _msg_response(msg: object) -> ChatMessageResponse:
     from stratiq.domain.entities import ChatMessage
 
     assert isinstance(msg, ChatMessage)
+    evidence_sufficient = msg.role != "assistant" or bool(msg.citations)
     return ChatMessageResponse(
         id=msg.id,
         session_id=msg.session_id,
@@ -101,4 +102,5 @@ def _msg_response(msg: object) -> ChatMessageResponse:
             for c in msg.citations
         ],
         created_at=msg.created_at,
+        evidence_sufficient=evidence_sufficient,
     )

@@ -265,22 +265,33 @@ class DecisionIntelligenceService:
         self, owner_id: uuid.UUID, document_id: uuid.UUID | None = None
     ) -> list[dict[str, Any]]:
         cards = await self._decisions.list_cards(owner_id, document_id)
-        return [
-            {
-                "kpi_id": str(c.kpi_id),
-                "kpi_name": c.kpi_name,
-                "current_value": c.current_value,
-                "unit": c.unit,
-                "forecast_value": c.forecast_value,
-                "forecast_horizon": c.forecast_horizon,
-                "forecast_explanation": c.forecast_explanation,
-                "trend": c.trend.value,
-                "confidence": c.confidence,
-                "evidence_mode": c.evidence_mode.value,
-            }
-            for c in cards
-            if c.forecast_value or c.forecast_explanation
-        ]
+        results: list[dict[str, Any]] = []
+        for c in cards:
+            has_value = bool(c.forecast_value)
+            explanation = c.forecast_explanation
+            if has_value:
+                status = "ok"
+            else:
+                status = "insufficient_history"
+                explanation = explanation or (
+                    "Insufficient historical data to produce a forecast."
+                )
+            results.append(
+                {
+                    "kpi_id": str(c.kpi_id),
+                    "kpi_name": c.kpi_name,
+                    "current_value": c.current_value,
+                    "unit": c.unit,
+                    "forecast_value": c.forecast_value,
+                    "forecast_horizon": c.forecast_horizon,
+                    "forecast_explanation": explanation,
+                    "trend": c.trend.value,
+                    "confidence": c.confidence,
+                    "evidence_mode": c.evidence_mode.value,
+                    "status": status,
+                }
+            )
+        return results
 
     async def _evidence_for_kpis(self, kpis: list[KPI]) -> dict[str, str]:
         result: dict[str, str] = {}

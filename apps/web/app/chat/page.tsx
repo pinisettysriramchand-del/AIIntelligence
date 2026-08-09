@@ -16,6 +16,7 @@ type Message = {
   role: string;
   content: string;
   citations: Citation[];
+  evidence_sufficient?: boolean;
 };
 
 export default function ChatPage() {
@@ -80,6 +81,9 @@ export default function ChatPage() {
             <div key={msg.id} className={`bubble ${msg.role === "user" ? "user" : ""}`}>
               <div className="muted">{msg.role}</div>
               <div>{msg.content}</div>
+              {msg.role === "assistant" && msg.evidence_sufficient === false && (
+                <p className="error">Insufficient evidence — answer is not grounded in uploaded sources.</p>
+              )}
               {msg.citations?.map((c) => (
                 <div className="citation" key={`${msg.id}-${c.chunk_id}`}>
                   [{String(c.chunk_id).slice(0, 8)}] {c.excerpt}

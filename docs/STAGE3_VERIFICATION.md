@@ -100,6 +100,14 @@ Part 3 sources on disk: `docs/source/part3/` (01, 02, 03, 05, 06, 07).
 
 **ACCEPTED** (2026-08-09).
 
-Core journey (auth → upload → KPI/DI → export) is implemented and covered by automated tests (**59 passed**). Remaining product gaps (richer comparisons, stricter insufficient-evidence chat copy, observability metrics) remain **explicitly deferred**.
+Core journey (auth → upload → KPI/DI → export) is implemented and covered by automated tests. FR-005/007/008 follow-ups landed post-acceptance; observability metrics remain deferred.
 
-Optional next (on request only): git commit of 3A–3C work, or implement deferred follow-ups.
+## Deferred follow-ups (post-acceptance)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| FR-005 KPI comparisons | Done | Dashboard derives period deltas/trends; UI shows vs prior period |
+| FR-007 Insufficient-evidence chat | Done | Early return without LLM; `evidence_sufficient` flag + UI banner |
+| FR-008 Forecast insufficient history | Done | All cards listed; `status=insufficient_history` + UI messaging |
+| Observability metrics | Deferred | Still open |
+

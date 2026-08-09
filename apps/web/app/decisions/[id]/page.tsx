@@ -103,10 +103,19 @@ export default function DecisionCardPage() {
             <h2>Recommendation</h2>
             <p>{card.recommendation}</p>
             <h2>Forecast</h2>
-            <p>
-              {card.forecast_value || "—"} ({card.forecast_horizon || "n/a"})
-            </p>
-            <p className="muted">{card.forecast_explanation}</p>
+            {card.forecast_value ? (
+              <>
+                <p>
+                  {card.forecast_value} ({card.forecast_horizon || "n/a"})
+                </p>
+                <p className="muted">{card.forecast_explanation}</p>
+              </>
+            ) : (
+              <p className="error">
+                {card.forecast_explanation ||
+                  "Insufficient historical data to produce a forecast."}
+              </p>
+            )}
             <h2>Evidence</h2>
             <p className="muted">{card.evidence_chunk_ids.join(", ") || "None"}</p>
           </section>

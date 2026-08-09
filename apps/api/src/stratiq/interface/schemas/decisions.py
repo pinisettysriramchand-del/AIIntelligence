@@ -57,3 +57,4 @@ class ForecastResponse(BaseModel):
     trend: str
     confidence: float = 0.0
     evidence_mode: str = "evidence"
+    status: str = "ok"

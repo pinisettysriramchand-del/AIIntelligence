@@ -34,6 +34,7 @@ class ChatMessageResponse(BaseModel):
     content: str
     citations: list[CitationResponse]
     created_at: datetime
+    evidence_sufficient: bool = True
 
     model_config = {"from_attributes": True}
 

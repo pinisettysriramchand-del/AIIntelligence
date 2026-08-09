@@ -45,6 +45,7 @@ Rules:
 - evidence_chunk_ids must come from provided chunks.
 - Use evidence_mode=insufficient when evidence cannot support a claim.
 - Label inference explicitly in narrative when extrapolating.
+- If period history is insufficient for a forecast, set forecast_value and forecast_horizon to null and set forecast_explanation to a clear insufficient-history sentence.
 """
 
 

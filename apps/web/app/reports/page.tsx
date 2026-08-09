@@ -23,6 +23,8 @@ type Forecast = {
   forecast_horizon?: string | null;
   forecast_explanation?: string | null;
   trend: string;
+  status?: string;
+  evidence_mode?: string;
 };
 
 export default function ReportsPage() {
@@ -95,7 +97,14 @@ export default function ReportsPage() {
           <div className="kpi-row" key={item.kpi_name}>
             <div>
               <strong>{item.kpi_name}</strong>
-              <div className="muted">{item.forecast_explanation}</div>
+              {item.status === "insufficient_history" || !item.forecast_value ? (
+                <div className="error">
+                  {item.forecast_explanation ||
+                    "Insufficient historical data to produce a forecast."}
+                </div>
+              ) : (
+                <div className="muted">{item.forecast_explanation}</div>
+              )}
             </div>
             <div>
               {item.current_value}
