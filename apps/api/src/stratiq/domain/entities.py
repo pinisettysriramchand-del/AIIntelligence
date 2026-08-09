@@ -61,6 +61,13 @@ class KPI:
     raw_extraction: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    business_meaning: str | None = None
+    confidence: float = 0.5
+    dimensions: dict[str, Any] = field(default_factory=dict)
+    previous_value: str | None = None
+    previous_period: str | None = None
+    trend: TrendDirection = TrendDirection.unknown
+    delta_label: str | None = None
 
     def __post_init__(self) -> None:
         if not self.evidence_chunk_ids:

@@ -20,7 +20,16 @@ class DashboardService:
 
         by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for kpi in kpis:
-            comparison = comparisons.get(kpi.id)
+            comparison = None
+            if kpi.previous_value is not None or kpi.trend.value != "unknown":
+                comparison = {
+                    "previous_period": kpi.previous_period,
+                    "previous_value": kpi.previous_value,
+                    "delta_label": kpi.delta_label or "n/a",
+                    "trend": kpi.trend.value,
+                }
+            else:
+                comparison = comparisons.get(kpi.id)
             by_domain[kpi.domain.value].append(
                 {
                     "id": str(kpi.id),
@@ -30,7 +39,10 @@ class DashboardService:
                     "period": kpi.period,
                     "document_id": str(kpi.document_id),
                     "evidence_count": len(kpi.evidence_chunk_ids),
-                    "trend": comparison["trend"] if comparison else "unknown",
+                    "business_meaning": kpi.business_meaning,
+                    "confidence": kpi.confidence,
+                    "dimensions": kpi.dimensions,
+                    "trend": (comparison["trend"] if comparison else kpi.trend.value),
                     "comparison": comparison,
                 }
             )

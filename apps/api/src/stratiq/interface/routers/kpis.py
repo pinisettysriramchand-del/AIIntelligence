@@ -82,4 +82,11 @@ def _kpi_response(k: object) -> KPIResponse:
         evidence_chunk_ids=k.evidence_chunk_ids,
         created_at=k.created_at,
         updated_at=k.updated_at,
+        business_meaning=k.business_meaning,
+        confidence=k.confidence,
+        dimensions=k.dimensions or {},
+        previous_value=k.previous_value,
+        previous_period=k.previous_period,
+        trend=k.trend.value if hasattr(k.trend, "value") else str(k.trend),
+        delta_label=k.delta_label,
     )

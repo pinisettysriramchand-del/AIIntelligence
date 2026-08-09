@@ -1,37 +1,32 @@
 # Part 4 Architecture Validation — Enterprise Hardening
 
-**Status:** Stage 4A COMPLETE — AWAITING APPROVAL for next stage  
+**Status:** Stage 4A+4B COMPLETE — AWAITING APPROVAL for next stage  
 **Date:** 2026-08-09  
 **Sources:** `docs/source/part4/` (01–03, 05–07)  
-**Baseline:** Part 3 ACCEPTED · OTEL on master  
+**Baseline:** Part 3 ACCEPTED · portable Postgres + Alembic verified  
 
 ---
 
 ## Stage 4A result
 
-**DONE.** Alembic revision `002_decision_intelligence` creates `decision_cards` and `executive_reports` (with FKs/indexes) and supports downgrade.
+**DONE.** Alembic `002_decision_intelligence` + live upgrade/downgrade verified.
 
-| Check | Result |
-|-------|--------|
-| Migration file | `apps/api/alembic/versions/002_decision_intelligence.py` |
-| Head | `002_decision_intelligence` (revises `001_initial`) |
-| Unit tests | `tests/unit/test_migration_di.py` |
+## Stage 4B result
 
-Apply on environments already at `001_initial`:
-```
-cd apps/api
-alembic upgrade head
-```
-Rollback:
-```
-alembic downgrade 001_initial
-```
+**DONE.** KPI intelligence fields + deterministic prior/trend enrichment.
+
+| Item | Detail |
+|------|--------|
+| Migration | `003_kpi_intelligence` |
+| Domain/API | `business_meaning`, `confidence`, `dimensions`, `previous_*`, `trend`, `delta_label` |
+| Logic | `application/kpi_intelligence.py` |
+| UI | Dashboard Top KPIs shows meaning/confidence/comparison |
 
 ---
 
 ## Verdict (overall Part 4)
 
-**CONDITIONAL FAIL** remains for full Part 4 until later stages. 4A closes the schema-truth blocker for DI tables.
+**CONDITIONAL FAIL** remains until later stages (4C+). 4A–4B close schema truth + KPI intelligence MVP.
 
 ---
 
@@ -39,17 +34,27 @@ alembic downgrade 001_initial
 
 | # | Requirement | Verdict | Notes |
 |---|-------------|---------|-------|
-| 1 | KPI Intelligence (§24) | FAIL | Flat KPI only; no definition/observation split; meaning/confidence/dimensions thin; calc not deterministic |
-| 2 | Decision Cards (§25) | CONDITIONAL PASS | Core fields present; missing **topic**, **expected outcome** |
-| 3 | Data quality (§26) | FAIL | No DQ detector/API/UI warnings |
-| 4 | Traceability (§27) | FAIL | No Part 4 matrix yet |
-| 5 | Enterprise data (§18) | FAIL | No orgs; no jobs table; DI tables missing from Alembic initial migration |
-| 6 | Reliability (§20) | FAIL | No idempotent reprocess, retries/DLQ, job entity |
-| 7 | Disaster recovery (§21) | FAIL | No RPO/RTO / backup runbook |
-| 8 | Observability (§22) | CONDITIONAL PASS | `/metrics` + OTEL exist; weak request/job/AI correlation IDs |
-| 9 | UI L1/L2/L3 + charts | FAIL | Flat dashboard text; no chart library |
-| 10 | Prompt governance | FAIL | Thin `part3-v1`; inline extract prompts; no eval cases |
-| 11 | Model ports | PASS | `LLMClient` / embeddings / vector / storage / queue |
+| 1 | KPI Intelligence (§24) | CONDITIONAL PASS | Fields + deterministic compare; definition/observation split still deferred |
+| 2 | Decision Cards (§25) | CONDITIONAL PASS | Missing topic / expected outcome (4D) |
+| 3 | Data quality (§26) | FAIL | Stage 4C |
+| 4 | Traceability (§27) | FAIL | Stage 4J |
+| 5 | Enterprise data (§18) | PARTIAL | DI tables migrated; orgs/jobs deferred |
+| 6 | Reliability (§20) | FAIL | Stage 4E |
+| 7 | Disaster recovery (§21) | FAIL | Stage 4G |
+| 8 | Observability (§22) | CONDITIONAL PASS | OTEL exists; correlation IDs thin (4F) |
+| 9 | UI L1/L2/L3 + charts | FAIL | Stage 4H |
+| 10 | Prompt governance | FAIL | Stage 4I |
+| 11 | Model ports | PASS | |
+
+---
+
+## Approval gate (next)
+
+1. **Approve Stage 4C** — data-quality warnings (**recommended**)
+2. **Approve Stage 4B+4C** (4B already done)
+3. **Approve Stage 4D** — Decision Card topic/expected_outcome
+4. **Request git commit** of 4B
+5. **Overrides**
 
 ---
 

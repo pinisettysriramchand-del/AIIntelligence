@@ -100,6 +100,13 @@ class KPIModel(Base):
     period: Mapped[str | None] = mapped_column(String(128), nullable=True)
     evidence_chunk_ids: Mapped[list[Any]] = mapped_column(GenericJSON, nullable=False, default=list)
     raw_extraction: Mapped[dict[str, Any]] = mapped_column(GenericJSON, nullable=False, default=dict)
+    business_meaning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[str] = mapped_column(String(32), nullable=False, default="0.5")
+    dimensions: Mapped[dict[str, Any]] = mapped_column(GenericJSON, nullable=False, default=dict)
+    previous_value: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    previous_period: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    trend: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    delta_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

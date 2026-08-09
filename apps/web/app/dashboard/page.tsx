@@ -18,6 +18,8 @@ type DashboardApi = {
       unit?: string | null;
       period?: string | null;
       trend?: string;
+      business_meaning?: string | null;
+      confidence?: number;
       comparison?: {
         previous_period?: string | null;
         previous_value?: string;
@@ -71,7 +73,14 @@ type DashboardView = {
     period?: string | null;
     domain?: string | null;
     trend?: string;
-    comparison?: DashboardApi["domains"][number]["kpis"][number]["comparison"];
+    business_meaning?: string | null;
+    confidence?: number;
+    comparison?: {
+      previous_period?: string | null;
+      previous_value?: string;
+      delta_label?: string;
+      trend?: string;
+    } | null;
   }>;
 };
 
@@ -229,7 +238,9 @@ export default function DashboardPage() {
                     {kpi.domain || "General"}
                     {kpi.period ? ` · ${kpi.period}` : ""}
                     {kpi.trend && kpi.trend !== "unknown" ? ` · trend ${kpi.trend}` : ""}
+                    {kpi.confidence != null ? ` · conf ${(kpi.confidence * 100).toFixed(0)}%` : ""}
                   </div>
+                  {kpi.business_meaning && <div className="muted">{kpi.business_meaning}</div>}
                   {kpi.comparison && (
                     <div className="muted">
                       vs {kpi.comparison.previous_period || "prior"}:{" "}

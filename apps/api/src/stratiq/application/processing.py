@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from stratiq.application.ports import EmbeddingClient, LLMClient, ObjectStorage, VectorStore
-from stratiq.domain.enums import DocumentStatus, KPIDomain
+from stratiq.application.kpi_intelligence import enrich_kpis_with_comparisons, normalize_extraction_fields
+from stratiq.domain.enums import DocumentStatus, KPIDomain, TrendDirection
 from stratiq.domain.exceptions import EvidenceRequiredError, ProcessingError
 from stratiq.infrastructure.observability import Timer, get_metrics
 
@@ -24,13 +25,16 @@ Document text:
 _KPI_EXTRACT_PROMPT = """You are a KPI extraction specialist. Given the following document chunks, 
 extract all measurable KPIs. For each KPI return:
 - name: descriptive KPI name
+- business_meaning: one-sentence business meaning
 - value: numeric or textual value  
 - unit: unit of measurement (optional)
 - period: time period (optional)
 - domain: one of financial/operational/strategic/risk/hr/marketing/technology/other
+- confidence: number 0-1 for extraction confidence
+- dimensions: object of related dimensions (optional), e.g. {{"region": "EMEA"}}
 - evidence_chunk_ids: list of chunk IDs (strings) that contain evidence for this KPI
 
-Return JSON: {"kpis": [{"name": ..., "value": ..., "unit": ..., "period": ..., "domain": ..., "evidence_chunk_ids": [...]}]}
+Return JSON: {{"kpis": [{{"name": ..., "business_meaning": ..., "value": ..., "unit": ..., "period": ..., "domain": ..., "confidence": ..., "dimensions": {{}}, "evidence_chunk_ids": [...]}}]}}
 
 Chunks (id: content):
 {chunks}"""
@@ -143,6 +147,7 @@ class ProcessingService:
                     continue
 
                 try:
+                    intel = normalize_extraction_fields(raw_kpi)
                     kpi = KPI(
                         id=uuid.uuid4(),
                         document_id=document_id,
@@ -156,6 +161,10 @@ class ProcessingService:
                         raw_extraction=raw_kpi,
                         created_at=now,
                         updated_at=now,
+                        business_meaning=intel["business_meaning"],
+                        confidence=intel["confidence"],
+                        dimensions=intel["dimensions"],
+                        trend=TrendDirection.unknown,
                     )
                     kpi_entities.append(kpi)
                 except (ValueError, EvidenceRequiredError) as exc:
@@ -163,6 +172,8 @@ class ProcessingService:
                     continue
 
             if kpi_entities:
+                existing = await self._kpis.list_by_owner(doc.owner_id)
+                enrich_kpis_with_comparisons(kpi_entities, existing_kpis=existing)
                 await self._kpis.save_many(kpi_entities)
 
             await self._docs.update_status(document_id, DocumentStatus.ready)

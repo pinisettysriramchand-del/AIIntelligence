@@ -15,13 +15,13 @@ def test_orm_registers_di_tables():
     assert "executive_reports" in Base.metadata.tables
 
 
-def test_alembic_head_is_002_decision_intelligence():
+def test_alembic_head_is_003_kpi_intelligence():
     api_root = Path(__file__).resolve().parents[2]
     cfg = Config(str(api_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(api_root / "alembic"))
     scripts = ScriptDirectory.from_config(cfg)
     heads = scripts.get_heads()
-    assert heads == ["002_decision_intelligence"]
+    assert heads == ["003_kpi_intelligence"]
 
 
 def test_migration_002_upgrade_sql_contains_di_tables():

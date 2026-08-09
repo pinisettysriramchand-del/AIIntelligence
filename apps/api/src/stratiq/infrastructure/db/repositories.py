@@ -84,6 +84,14 @@ def _chunk_from_model(m: ChunkModel) -> Chunk:
 
 def _kpi_from_model(m: KPIModel) -> KPI:
     evidence_ids = [uuid.UUID(cid) if isinstance(cid, str) else cid for cid in m.evidence_chunk_ids]
+    try:
+        confidence = float(m.confidence)
+    except (TypeError, ValueError):
+        confidence = 0.5
+    try:
+        trend = TrendDirection(m.trend)
+    except ValueError:
+        trend = TrendDirection.unknown
     return KPI(
         id=m.id,
         document_id=m.document_id,
@@ -94,9 +102,16 @@ def _kpi_from_model(m: KPIModel) -> KPI:
         unit=m.unit,
         period=m.period,
         evidence_chunk_ids=evidence_ids,
-        raw_extraction=m.raw_extraction,
+        raw_extraction=m.raw_extraction or {},
         created_at=m.created_at,
         updated_at=m.updated_at,
+        business_meaning=m.business_meaning,
+        confidence=confidence,
+        dimensions=m.dimensions or {},
+        previous_value=m.previous_value,
+        previous_period=m.previous_period,
+        trend=trend,
+        delta_label=m.delta_label,
     )
 
 
@@ -254,6 +269,13 @@ class KPIRepository:
                 period=k.period,
                 evidence_chunk_ids=[str(cid) for cid in k.evidence_chunk_ids],
                 raw_extraction=k.raw_extraction,
+                business_meaning=k.business_meaning,
+                confidence=str(k.confidence),
+                dimensions=k.dimensions or {},
+                previous_value=k.previous_value,
+                previous_period=k.previous_period,
+                trend=k.trend.value,
+                delta_label=k.delta_label,
                 created_at=k.created_at,
                 updated_at=k.updated_at,
             )
