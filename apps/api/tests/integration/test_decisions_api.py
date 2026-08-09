@@ -137,6 +137,11 @@ async def test_generate_decisions_and_pdf(
     assert body["cards"][0]["business_impact"]
     assert body["cards"][0]["evidence_mode"] == "evidence"
     assert body["cards"][0]["confidence"] > 0
+    assert body["cards"][0]["topic"] == "Decision on Revenue"
+    assert body["cards"][0]["expected_outcome"] == "Outcome not specified from evidence."
+    assert "Revenue:" in body["cards"][0]["kpi_signal"]
+    assert "up" in body["cards"][0]["kpi_signal"]
+    assert "healthy" in body["cards"][0]["kpi_signal"]
 
     cards = await client.get("/api/v1/decisions/cards", headers=auth_headers)
     assert cards.status_code == 200

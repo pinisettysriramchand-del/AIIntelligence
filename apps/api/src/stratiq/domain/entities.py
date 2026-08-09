@@ -124,12 +124,14 @@ class DecisionCard:
     domain: str | None
     trend: TrendDirection
     health: HealthLabel
+    topic: str
     what_happened: str
     why_it_happened: str
     business_impact: str
     risks: list[str]
     opportunities: list[str]
     recommendation: str
+    expected_outcome: str
     forecast_value: str | None
     forecast_horizon: str | None
     forecast_explanation: str | None
@@ -138,6 +140,16 @@ class DecisionCard:
     evidence_chunk_ids: list[uuid.UUID]
     related_kpi_ids: list[uuid.UUID] = field(default_factory=list)
     created_at: datetime | None = None
+
+    @property
+    def kpi_signal(self) -> str:
+        """Part 4 §25 KPI signal: value + period + direction + health."""
+        unit_part = f" {self.unit}" if self.unit else ""
+        period_part = f" ({self.period})" if self.period else ""
+        return (
+            f"{self.kpi_name}: {self.current_value}{unit_part}{period_part}"
+            f" · {self.trend.value} · {self.health.value}"
+        )
 
 
 @dataclass

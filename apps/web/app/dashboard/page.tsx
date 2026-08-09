@@ -48,11 +48,14 @@ type DocumentRow = {
 type DecisionCard = {
   id: string;
   kpi_name: string;
+  topic?: string;
+  kpi_signal?: string;
   current_value: string;
   unit?: string | null;
   trend: string;
   health: string;
   recommendation: string;
+  expected_outcome?: string;
 };
 
 type Executive = {
@@ -244,12 +247,13 @@ export default function DashboardPage() {
               <div className="kpi-row" key={card.id}>
                 <div>
                   <Link href={`/decisions/${card.id}`}>
-                    <strong>{card.kpi_name}</strong>
+                    <strong>{card.topic || card.kpi_name}</strong>
                   </Link>
-                  <div className="muted">
-                    {card.trend} · {card.health}
-                  </div>
+                  <div className="muted">{card.kpi_signal || `${card.trend} · ${card.health}`}</div>
                   <div className="muted">{card.recommendation}</div>
+                  {card.expected_outcome && (
+                    <div className="muted">Expected: {card.expected_outcome}</div>
+                  )}
                 </div>
                 <div>
                   {card.current_value}

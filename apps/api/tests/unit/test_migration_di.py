@@ -15,13 +15,13 @@ def test_orm_registers_di_tables():
     assert "executive_reports" in Base.metadata.tables
 
 
-def test_alembic_head_is_004_data_quality():
+def test_alembic_head_is_005_decision_card_topic():
     api_root = Path(__file__).resolve().parents[2]
     cfg = Config(str(api_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(api_root / "alembic"))
     scripts = ScriptDirectory.from_config(cfg)
     heads = scripts.get_heads()
-    assert heads == ["004_data_quality"]
+    assert heads == ["005_decision_card_topic"]
 
 
 def test_migration_002_upgrade_sql_contains_di_tables():
@@ -63,6 +63,8 @@ def test_decision_card_columns_match_orm():
         "risks",
         "opportunities",
         "recommendation",
+        "topic",
+        "expected_outcome",
         "confidence",
         "evidence_mode",
         "evidence_chunk_ids",

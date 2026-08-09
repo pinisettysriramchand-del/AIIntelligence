@@ -8,6 +8,8 @@ import { api, getTokens } from "@/lib/api";
 type DecisionCard = {
   id: string;
   kpi_name: string;
+  topic?: string;
+  kpi_signal?: string;
   current_value: string;
   unit?: string | null;
   period?: string | null;
@@ -20,6 +22,7 @@ type DecisionCard = {
   risks: string[];
   opportunities: string[];
   recommendation: string;
+  expected_outcome?: string;
   forecast_value?: string | null;
   forecast_horizon?: string | null;
   forecast_explanation?: string | null;
@@ -55,11 +58,8 @@ export default function DecisionCardPage() {
       {!loading && !error && !card && <p className="muted">Decision card not found.</p>}
       {card && (
         <>
-          <h1 className="hero-title">{card.kpi_name}</h1>
-          <p className="lead">
-            {card.current_value}
-            {card.unit ? ` ${card.unit}` : ""} · {card.period || "n/a"} · {card.domain || "General"}
-          </p>
+          <h1 className="hero-title">{card.topic || card.kpi_name}</h1>
+          <p className="lead">{card.kpi_signal || `${card.kpi_name}: ${card.current_value}`}</p>
           {card.evidence_mode === "insufficient" && (
             <p className="error">Insufficient evidence for a fully grounded recommendation.</p>
           )}
@@ -102,6 +102,8 @@ export default function DecisionCardPage() {
             </ul>
             <h2>Recommendation</h2>
             <p>{card.recommendation}</p>
+            <h2>Expected outcome</h2>
+            <p>{card.expected_outcome || "Outcome not specified from evidence."}</p>
             <h2>Forecast</h2>
             {card.forecast_value ? (
               <>

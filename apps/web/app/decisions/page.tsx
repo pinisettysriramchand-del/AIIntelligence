@@ -9,11 +9,14 @@ import { api, getTokens } from "@/lib/api";
 type DecisionCard = {
   id: string;
   kpi_name: string;
+  topic?: string;
+  kpi_signal?: string;
   current_value: string;
   unit?: string | null;
   trend: string;
   health: string;
   recommendation: string;
+  expected_outcome?: string;
   what_happened: string;
 };
 
@@ -36,7 +39,7 @@ export default function DecisionsPage() {
     <main>
       <AppNav />
       <h1 className="hero-title">Decision Cards</h1>
-      <p className="lead">What happened, why it happened, and what to do next for each KPI.</p>
+      <p className="lead">Topic, KPI signal, what happened, and what to do next.</p>
       {error && <p className="error">{error}</p>}
       <section className="panel">
         {cards.length === 0 && <p className="muted">No cards yet. Generate from the dashboard.</p>}
@@ -44,12 +47,13 @@ export default function DecisionsPage() {
           <div className="kpi-row" key={card.id}>
             <div>
               <Link href={`/decisions/${card.id}`}>
-                <strong>{card.kpi_name}</strong>
+                <strong>{card.topic || card.kpi_name}</strong>
               </Link>
-              <div className="muted">
-                {card.health} · {card.trend}
-              </div>
+              <div className="muted">{card.kpi_signal || `${card.health} · ${card.trend}`}</div>
               <div>{card.what_happened}</div>
+              {card.expected_outcome && (
+                <div className="muted">Expected: {card.expected_outcome}</div>
+              )}
             </div>
             <div>
               {card.current_value}

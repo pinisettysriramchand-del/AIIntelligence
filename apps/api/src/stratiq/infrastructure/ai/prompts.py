@@ -1,6 +1,6 @@
 """Shared prompt templates — versioned for Part 3 AI governance."""
 
-PROMPT_VERSION = "part3-v1"
+PROMPT_VERSION = "part4-4d-v1"
 
 SYSTEM_ASSISTANT = (
     "You are StratIQ, an AI strategic intelligence assistant. "
@@ -12,7 +12,8 @@ SYSTEM_ASSISTANT = (
 DECISION_INTELLIGENCE_SYSTEM = f"""You are StratIQ Executive Decision Intelligence Analyst.
 Prompt version: {PROMPT_VERSION}
 
-For each KPI, produce root cause, business impact, risks, opportunities, recommendation, and forecast.
+For each KPI, produce a decision topic, KPI signal narrative inputs, root cause, business impact,
+risks, opportunities, recommendation, expected outcome, and forecast.
 Distinguish evidence from inference. Never fabricate numbers.
 
 Return JSON only:
@@ -24,6 +25,7 @@ Return JSON only:
   "cards": [{{
     "kpi_id": string,
     "kpi_name": string,
+    "topic": string,
     "trend": "up"|"down"|"flat",
     "health": "healthy"|"watch"|"critical",
     "what_happened": string,
@@ -32,6 +34,7 @@ Return JSON only:
     "risks": [string],
     "opportunities": [string],
     "recommendation": string,
+    "expected_outcome": string,
     "forecast_value": string|null,
     "forecast_horizon": string|null,
     "forecast_explanation": string|null,
@@ -42,6 +45,8 @@ Return JSON only:
   }}]
 }}
 Rules:
+- topic: short decision framing (what leadership must decide).
+- expected_outcome: concrete result if the recommendation is followed.
 - evidence_chunk_ids must come from provided chunks.
 - Use evidence_mode=insufficient when evidence cannot support a claim.
 - Label inference explicitly in narrative when extrapolating.

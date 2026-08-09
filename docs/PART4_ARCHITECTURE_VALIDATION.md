@@ -1,6 +1,6 @@
 # Part 4 Architecture Validation — Enterprise Hardening
 
-**Status:** Stage 4A+4B+4C COMPLETE — AWAITING APPROVAL for next stage  
+**Status:** Stage 4A–4D COMPLETE — AWAITING APPROVAL for next stage  
 **Date:** 2026-08-09  
 **Sources:** `docs/source/part4/` (01–03, 05–07)  
 **Baseline:** Part 3 ACCEPTED · portable Postgres + Alembic verified  
@@ -11,32 +11,30 @@
 
 **DONE.** Alembic `002_decision_intelligence` + live upgrade/downgrade verified.
 
-## Stage 4C result
-
-**DONE.** Data-quality warnings detected, persisted on documents, surfaced on dashboard/upload UI.
-
-| Item | Detail |
-|------|--------|
-| Migration | `004_data_quality` |
-| Detector | `application/data_quality.py` |
-| API | Document `quality_warnings`; Dashboard `data_quality_warnings` |
-
 ## Stage 4B result
 
-**DONE.** KPI intelligence fields + deterministic prior/trend enrichment.
+**DONE.** KPI intelligence fields + deterministic prior/trend enrichment (`003_kpi_intelligence`).
+
+## Stage 4C result
+
+**DONE.** Data-quality warnings detected, persisted on documents, surfaced on dashboard/upload UI (`004_data_quality`).
+
+## Stage 4D result
+
+**DONE.** Decision Card `topic` + `expected_outcome` + KPI signal clarity.
 
 | Item | Detail |
 |------|--------|
-| Migration | `003_kpi_intelligence` |
-| Domain/API | `business_meaning`, `confidence`, `dimensions`, `previous_*`, `trend`, `delta_label` |
-| Logic | `application/kpi_intelligence.py` |
-| UI | Dashboard Top KPIs shows meaning/confidence/comparison |
+| Migration | `005_decision_card_topic` |
+| Domain/API | `topic`, `expected_outcome`, computed `kpi_signal` |
+| Prompt | `part4-4d-v1` |
+| UI | Decisions list/detail + dashboard |
 
 ---
 
 ## Verdict (overall Part 4)
 
-**CONDITIONAL FAIL** remains until later stages (4C+). 4A–4B close schema truth + KPI intelligence MVP.
+**CONDITIONAL FAIL** remains until reliability/UI/traceability stages (4E+).
 
 ---
 
@@ -45,7 +43,7 @@
 | # | Requirement | Verdict | Notes |
 |---|-------------|---------|-------|
 | 1 | KPI Intelligence (§24) | CONDITIONAL PASS | Fields + deterministic compare; definition/observation split still deferred |
-| 2 | Decision Cards (§25) | CONDITIONAL PASS | Missing topic / expected outcome (4D) |
+| 2 | Decision Cards (§25) | CONDITIONAL PASS | topic / expected_outcome / kpi_signal present; L1–L3 UI still 4H |
 | 3 | Data quality (§26) | CONDITIONAL PASS | Detector + API/UI; raw tabular DQ scan deferred |
 | 4 | Traceability (§27) | FAIL | Stage 4J |
 | 5 | Enterprise data (§18) | PARTIAL | DI tables migrated; orgs/jobs deferred |
@@ -60,50 +58,20 @@
 
 ## Approval gate (next)
 
-1. **Approve Stage 4D** — Decision Card topic/expected_outcome (**recommended**)
-2. **Approve Stage 4E** — reliability (jobs/idempotency/DLQ)
-3. **Request git commit** of 4C
+1. **Approve Stage 4E** — reliability (jobs/idempotency/DLQ) (**recommended**)
+2. **Approve Stage 4F** — correlation IDs
+3. **Request git commit** of 4D
 4. **Overrides**
 
 ---
 
-## Critical findings
-
-1. **Alembic gap:** ORM has `decision_cards` / `executive_reports`, but `001_initial` migration may not create them — Compose `migrate` can leave DI tables missing.
-2. **KPI model** is extraction-shaped, not Part 4 “definition + observation + deterministic calc.”
-3. **Data quality** is product-visible only as forecast insufficient-history, not a DQ system.
-4. **Dashboard** does not implement executive L1 → explanation L2 → action L3 with charts.
-
----
-
-## Proposed stages (smallest production-ready slices)
+## Proposed stages (remaining)
 
 | Stage | Scope |
 |-------|--------|
-| **4A** | Schema truth: Alembic migration for DI tables (+ any required indexes); upgrade/rollback check |
-| **4B** | KPI Intelligence MVP: meaning, confidence, dimensions; persist prior/trend when computable; tabular deterministic path |
-| **4C** | Data-quality warnings: detect + API + UI banners |
-| **4D** | Decision Card Part 4 fields: `topic`, `expected_outcome` (+ signal clarity); tests |
 | **4E** | Reliability: processing jobs, idempotent reprocess, ARQ retries/DLQ |
 | **4F** | Correlation IDs across request → job → AI (OTEL attributes) |
 | **4G** | DR runbook: RPO/RTO + backup procedures |
 | **4H** | UI L1/L2/L3 + minimal charts |
 | **4I** | Prompt registry (ID/version/schemas/eval cases) |
 | **4J** | Traceability matrix doc |
-
-**Recommended first approval:** **4A** (blocker), then **4B+4C**, then **4D**.
-
-### Out of scope until later
-Full multi-tenancy/orgs, ERP connectors, streaming, knowledge graphs, autonomous decision execution, LangGraph rewrite.
-
----
-
-## Approval gate (next)
-
-Stage 4A is complete. Reply with one of:
-
-1. **Approve Stage 4B** — KPI Intelligence MVP
-2. **Approve Stage 4B+4C** — KPI + data quality
-3. **Approve Stage 4D** — Decision Card topic/expected_outcome
-4. **Request git commit** of 4A
-5. **Overrides**

@@ -40,7 +40,8 @@ def build_executive_pdf(report: ExecutiveReport, cards: list[DecisionCard]) -> b
     story.append(Spacer(1, 0.15 * inch))
     story.append(Paragraph("Decision Cards", styles["Heading2"]))
     for card in cards:
-        story.append(Paragraph(f"{card.kpi_name}: {card.current_value}", styles["Heading3"]))
+        story.append(Paragraph(f"{card.topic or card.kpi_name}", styles["Heading3"]))
+        story.append(Paragraph(f"<b>KPI signal:</b> {card.kpi_signal}", styles["BodyText"]))
         story.append(
             Paragraph(
                 f"<b>Mode:</b> {card.evidence_mode.value} · <b>Confidence:</b> {card.confidence:.2f}",
@@ -57,6 +58,9 @@ def build_executive_pdf(report: ExecutiveReport, cards: list[DecisionCard]) -> b
                 Paragraph("<b>Opportunities:</b> " + "; ".join(card.opportunities), styles["BodyText"])
             )
         story.append(Paragraph(f"<b>Recommendation:</b> {card.recommendation}", styles["BodyText"]))
+        story.append(
+            Paragraph(f"<b>Expected outcome:</b> {card.expected_outcome}", styles["BodyText"])
+        )
         if card.forecast_value or card.forecast_explanation:
             story.append(
                 Paragraph(

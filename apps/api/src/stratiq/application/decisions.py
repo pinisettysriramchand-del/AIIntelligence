@@ -156,6 +156,7 @@ class DecisionIntelligenceService:
                     domain=kpi.domain.value if hasattr(kpi.domain, "value") else str(kpi.domain),
                     trend=_normalize_trend(item.get("trend")),
                     health=_normalize_health(item.get("health")),
+                    topic=str(item.get("topic") or "").strip() or f"Decision on {kpi.name}",
                     what_happened=str(item["what_happened"]).strip(),
                     why_it_happened=str(item["why_it_happened"]).strip(),
                     business_impact=str(item.get("business_impact") or "Impact not quantified from evidence.").strip(),
@@ -164,6 +165,8 @@ class DecisionIntelligenceService:
                         str(o).strip() for o in (item.get("opportunities") or []) if str(o).strip()
                     ],
                     recommendation=str(item["recommendation"]).strip(),
+                    expected_outcome=str(item.get("expected_outcome") or "").strip()
+                    or "Outcome not specified from evidence.",
                     forecast_value=(
                         str(item["forecast_value"]).strip() if item.get("forecast_value") else None
                     ),

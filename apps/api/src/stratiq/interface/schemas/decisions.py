@@ -14,6 +14,8 @@ class DecisionCardResponse(BaseModel):
     unit: str | None = None
     period: str | None = None
     domain: str | None = None
+    topic: str = ""
+    kpi_signal: str = ""
     trend: str
     health: str
     what_happened: str
@@ -22,6 +24,7 @@ class DecisionCardResponse(BaseModel):
     risks: list[str]
     opportunities: list[str]
     recommendation: str
+    expected_outcome: str = ""
     forecast_value: str | None = None
     forecast_horizon: str | None = None
     forecast_explanation: str | None = None
