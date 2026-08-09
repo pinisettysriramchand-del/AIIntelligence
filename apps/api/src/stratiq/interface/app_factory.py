@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Callable
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from stratiq.config import Settings
 from stratiq.domain.exceptions import (
@@ -22,10 +24,34 @@ from stratiq.domain.exceptions import (
     ValidationError,
 )
 from stratiq.infrastructure.db.session import close_db, init_db
+from stratiq.infrastructure.observability import get_metrics
 from stratiq.infrastructure.redis_client import close_redis, init_redis
 from stratiq.interface.routers import auth, chat, dashboard, decisions, documents, kpis, reports
 
 logger = logging.getLogger(__name__)
+
+
+class RequestMetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        start = time.perf_counter()
+        response: Response | None = None
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            path = request.url.path
+            # Collapse UUIDs to keep cardinality low
+            parts = []
+            for part in path.split("/"):
+                if len(part) == 36 and part.count("-") == 4:
+                    parts.append("{id}")
+                else:
+                    parts.append(part)
+            normalized = "/".join(parts) or "/"
+            duration_ms = (time.perf_counter() - start) * 1000.0
+            get_metrics().record_request(request.method, normalized, status_code, duration_ms)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -64,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestMetricsMiddleware)
 
     _register_exception_handlers(app)
 
@@ -78,6 +105,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": cfg.app_name}
+
+    @app.get("/metrics", tags=["observability"])
+    async def metrics() -> dict:
+        """Process-local MVP metrics (API latency, AI, processing, retrieval)."""
+        return get_metrics().snapshot()
 
     return app
 

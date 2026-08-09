@@ -10,6 +10,7 @@ from typing import Any
 from stratiq.application.ports import EmbeddingClient, LLMClient, ObjectStorage, VectorStore
 from stratiq.domain.enums import DocumentStatus, KPIDomain
 from stratiq.domain.exceptions import EvidenceRequiredError, ProcessingError
+from stratiq.infrastructure.observability import Timer, get_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ class ProcessingService:
         if doc is None:
             raise ProcessingError(f"Document {document_id} not found.")
 
+        timer = Timer()
         try:
             raw_bytes = await self._storage.load(doc.storage_path)
             parser = self._parser_factory.get_parser(doc.mime_type, doc.original_filename)
@@ -165,12 +167,14 @@ class ProcessingService:
 
             await self._docs.update_status(document_id, DocumentStatus.ready)
             await self._audit.log_document_processed(doc.owner_id, document_id, len(kpi_entities))
+            get_metrics().record_processing(timer.ms(), failed=False)
             logger.info(
                 "Document processed successfully",
                 extra={"doc_id": str(document_id), "chunks": len(chunk_entities), "kpis": len(kpi_entities)},
             )
 
         except Exception as exc:
+            get_metrics().record_processing(timer.ms(), failed=True)
             logger.exception("Document processing failed", extra={"doc_id": str(document_id)})
             await self._docs.update_status(document_id, DocumentStatus.failed, error_message=str(exc))
             await self._audit.log_document_failed(doc.owner_id, document_id, str(exc))

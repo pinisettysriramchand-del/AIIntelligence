@@ -266,6 +266,12 @@ async def app(test_settings: Settings, db_engine, fake_redis: FakeRedis) -> Fast
     async def health() -> dict:
         return {"status": "ok", "service": "StratIQ Test"}
 
+    @_app.get("/metrics")
+    async def metrics() -> dict:
+        from stratiq.infrastructure.observability import get_metrics
+
+        return get_metrics().snapshot()
+
     # Wire overrides
     _app.dependency_overrides[get_db_session] = _get_test_session
     _app.dependency_overrides[_deps.get_settings] = lambda: test_settings

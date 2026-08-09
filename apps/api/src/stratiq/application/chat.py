@@ -11,6 +11,7 @@ from stratiq.application.ports import EmbeddingClient, LLMClient, VectorStore
 from stratiq.domain.entities import ChatMessage, ChatSession, Citation
 from stratiq.domain.exceptions import AuthorizationError, NotFoundError
 from stratiq.infrastructure.ai.prompts import SYSTEM_ASSISTANT
+from stratiq.infrastructure.observability import get_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ class ChatService:
             top_k=6,
             filter_payload={"owner_id": str(owner_id)},
         )
+        get_metrics().record_retrieval(len(search_results))
 
         citations: list[Citation] = []
         context_parts: list[str] = []

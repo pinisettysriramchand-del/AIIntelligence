@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from stratiq.domain.exceptions import ProcessingError
+from stratiq.infrastructure.observability import Timer, get_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class OpenAILLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        timer = Timer()
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             try:
                 response = await client.post(
@@ -53,11 +55,16 @@ class OpenAILLMClient:
                 )
                 response.raise_for_status()
                 data = response.json()
+                usage = data.get("usage") or {}
+                tokens = usage.get("total_tokens")
+                get_metrics().record_ai_call(timer.ms(), tokens if isinstance(tokens, int) else None)
                 return data["choices"][0]["message"]["content"]
             except httpx.HTTPStatusError as exc:
+                get_metrics().record_ai_call(timer.ms())
                 logger.error("LLM HTTP error: %s", exc.response.text)
                 raise ProcessingError(f"LLM request failed: {exc.response.status_code}") from exc
             except (KeyError, IndexError, json.JSONDecodeError) as exc:
+                get_metrics().record_ai_call(timer.ms())
                 raise ProcessingError(f"LLM response parsing failed: {exc}") from exc
 
     async def json_completion(
