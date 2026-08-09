@@ -1,10 +1,11 @@
 # Ensure a local Postgres is available for Alembic / API development.
 # Prefer Docker Compose when the engine is healthy; otherwise use a
-# workspace-local portable PostgreSQL under .tools/pgsql (no system install).
+# workspace-local portable PostgreSQL under .tools/pgsql-complete (no system install).
 #
 # Root cause this addresses:
 #   Docker Desktop Linux engine requires WSL2. If WSL is missing/broken,
 #   com.docker.service starts then stops and localhost:5432 refuses connections.
+#   Symptom: alembic ConnectionRefusedError on 127.0.0.1:5432.
 
 param(
     [int]$Port = 5432,
@@ -75,32 +76,34 @@ if (Test-DockerEngine) {
 }
 
 $Tools = Join-Path $Root ".tools"
-$Pgsql = Join-Path $Tools "pgsql"
-$Data = Join-Path $Tools "pgdata"
-$Log = Join-Path $Tools "postgres.log"
+$ExtractRoot = Join-Path $Tools "pgsql-complete"
+$Pgsql = Join-Path $ExtractRoot "pgsql"
+$Data = Join-Path $Tools "pgdata-complete"
+$Log = Join-Path $Tools "postgres-complete.log"
 $Zip = Join-Path $Tools "postgresql-windows-binaries.zip"
-$SqlDir = Join-Path $Tools "sql"
 $Url = "https://get.enterprisedb.com/postgresql/postgresql-16.6-1-windows-x64-binaries.zip"
 
 New-Item -ItemType Directory -Force -Path $Tools | Out-Null
-New-Item -ItemType Directory -Force -Path $SqlDir | Out-Null
 
-if (-not (Test-Path (Join-Path $Pgsql "bin\pg_ctl.exe"))) {
-    Write-Output "Downloading portable PostgreSQL binaries (~290MB)..."
-    Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing
-    Write-Output "Extracting..."
-    Expand-Archive -Path $Zip -DestinationPath $Tools -Force
-    if (-not (Test-Path (Join-Path $Pgsql "bin\pg_ctl.exe"))) {
-        $found = Get-ChildItem $Tools -Recurse -Filter pg_ctl.exe | Select-Object -First 1
-        if (-not $found) { throw "pg_ctl.exe not found after extract" }
-        $Pgsql = $found.Directory.Parent.FullName
+if (-not (Test-Path (Join-Path $Pgsql "bin\pg_ctl.exe")) -or -not (Test-Path (Join-Path $Pgsql "share\postgres.bki"))) {
+    if (-not (Test-Path $Zip) -or ((Get-Item $Zip).Length -lt 300000000)) {
+        Write-Output "Downloading portable PostgreSQL binaries (~290MB)..."
+        Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing
     }
+    Write-Output "Extracting with .NET ZipFile..."
+    if (Test-Path $ExtractRoot) { Remove-Item $ExtractRoot -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $ExtractRoot | Out-Null
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($Zip, $ExtractRoot)
 }
 
 $Bin = Join-Path $Pgsql "bin"
 $Initdb = Join-Path $Bin "initdb.exe"
 $PgCtl = Join-Path $Bin "pg_ctl.exe"
+$CreateUser = Join-Path $Bin "createuser.exe"
+$CreateDb = Join-Path $Bin "createdb.exe"
 $Psql = Join-Path $Bin "psql.exe"
+$PgIsReady = Join-Path $Bin "pg_isready.exe"
 
 if (-not (Test-Path $Data)) {
     Write-Output "Initializing data directory..."
@@ -109,32 +112,16 @@ if (-not (Test-Path $Data)) {
 
 Write-Output "Starting portable Postgres on port $Port..."
 & $PgCtl -D $Data -l $Log -o "-p $Port" start | Out-Null
-Start-Sleep -Seconds 3
-
-if (-not (Test-TcpPort $Port)) {
+Start-Sleep -Seconds 4
+& $PgIsReady -h 127.0.0.1 -p $Port
+if ($LASTEXITCODE -ne 0) {
     if (Test-Path $Log) { Get-Content $Log -Tail 40 }
     throw "Portable Postgres failed to start (see $Log)"
 }
 
-$roleFile = Join-Path $SqlDir "ensure_role.sql"
-@(
-    'DO $$ BEGIN',
-    "  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$DbUser') THEN",
-    "    CREATE ROLE $DbUser LOGIN PASSWORD '$Password';",
-    '  END IF;',
-    'END $$;'
-) | Set-Content -Path $roleFile -Encoding ascii
-
-& $Psql -U postgres -h 127.0.0.1 -p $Port -d postgres -v ON_ERROR_STOP=1 -f $roleFile | Out-Null
-
-$checkFile = Join-Path $SqlDir "check_db.sql"
-Set-Content -Path $checkFile -Encoding ascii -Value "SELECT 1 FROM pg_database WHERE datname='$Database';"
-$exists = & $Psql -U postgres -h 127.0.0.1 -p $Port -d postgres -tAc -f $checkFile
-if (($exists | Out-String).Trim() -ne "1") {
-    $createFile = Join-Path $SqlDir "create_db.sql"
-    Set-Content -Path $createFile -Encoding ascii -Value "CREATE DATABASE $Database OWNER $DbUser;"
-    & $Psql -U postgres -h 127.0.0.1 -p $Port -d postgres -v ON_ERROR_STOP=1 -f $createFile | Out-Null
-}
+& $CreateUser -U postgres -h 127.0.0.1 -p $Port $DbUser 2>$null | Out-Null
+& $Psql -U postgres -h 127.0.0.1 -p $Port -d postgres -c "ALTER USER $DbUser WITH PASSWORD '$Password' LOGIN;" | Out-Null
+& $CreateDb -U postgres -h 127.0.0.1 -p $Port -O $DbUser $Database 2>$null | Out-Null
 
 Write-Output "POSTGRES_READY (portable) port=$Port user=$DbUser db=$Database"
 Write-Output ("DATABASE_URL=postgresql+asyncpg://" + $DbUser + ":" + $Password + "@127.0.0.1:" + $Port + "/" + $Database)
